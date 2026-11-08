@@ -25,7 +25,7 @@ git remote add origin https://github.com/DEIN-KONTO/DEIN-REPOSITORY.git
 git push -u origin main
 ```
 
-3. Auf https://share.streamlit.io eine neue App erstellen. GitHub-Repository auswählen, Branch **main**, Einstieg **app.py**. Python **3.14** verwenden, soweit angeboten (lokal damit geprüft); andernfalls zuerst die gewünschte Python-Version mit den festgelegten Abhängigkeiten prüfen. `requirements.txt` liegt direkt im Repository-Hauptverzeichnis. Keine Secrets oder externen Hausdateien nötig.
+3. Auf https://share.streamlit.io eine neue App erstellen. GitHub-Repository **tobi-ma/solarplanung**, Branch **main**, Einstieg **app.py**. Unter Advanced settings Python **3.14** auswählen (lokal mit **Python 3.14.3** geprüft). `requirements.txt` liegt direkt im Repository-Hauptverzeichnis. **Secrets-Feld leer lassen**: keine API-Schlüssel, Zugangsdaten oder externen Hausdateien erforderlich. Alle Wetterdaten sind im Repository enthalten. `.python-version` dokumentiert die lokale Zielversion; die Cloud-Version trotzdem im Deployment-Dialog auswählen.
 4. Deploy starten. Der lokale macOS-Starter wird in der Cloud nicht benötigt. Einstellungen und hochgeladene JSON-Dateien liegen pro Sitzung im Arbeitsspeicher und müssen für dauerhafte Aufbewahrung exportiert werden.
 
 [Offizielle Deployment-Anleitung](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy)
@@ -62,7 +62,7 @@ Neue Startannahmen: Haushaltsstrom 3.500 kWh/Jahr, Raumwärme 16.000 kWh Wärme/
 
 Raumheizstrom wird anhand von Temperaturstunden unter 15 °C verteilt (Gewicht 18 °C minus Außentemperatur, mit zusätzlichem Kältefaktor), anschließend auf Nutzwärme/JAZ normiert. Kühlung verteilt sich auf warme Stunden über 22 °C zwischen 10 und 22 Uhr und wird auf Kältebedarf/SEER normiert. Haushaltsstrom folgt einfachen auswählbaren Tagesmustern; Warmwasserladung auf vier Mittags- oder Morgen-/Abendstunden. Keine Gebäudesimulation, keine Heizlastbestimmung, keine Messprofile und keine Vorhersage einer konkreten JAZ.
 
-Batterie: anfangs leer, 6,9 kWh nutzbar, je 3,5 kW Lade-/Entladeleistung, 90 % Rundlaufwirkungsgrad als Annahme. Wirkungsgrad wird symmetrisch auf Laden/Entladen aufgeteilt. Direktverbrauch vor Laden, Entladung nur zur Lastdeckung, keine Netzladung. Die Energie am Jahresende bleibt gespeichert und wird nicht als Einspeisung oder Eigenverbrauch gezählt. Energieerhaltung: PV = Direktverbrauch + Batterieabgabe + Verluste + Einspeisung + Endinhalt. Keine Batteriealterung, Standbylast oder unterstündlichen Spitzen. Batterie ausschalten vermindert nicht automatisch den Angebotspreis.
+Batterie: anfangs leer, standardmäßig 6,9 kWh nutzbar, je 3,5 kW Lade-/Entladeleistung, 90 % Rundlaufwirkungsgrad als Annahme. Wirkungsgrad wird symmetrisch auf Laden/Entladen aufgeteilt. Direktverbrauch vor Laden, Entladung nur zur Lastdeckung, keine Netzladung. Die Energie am Jahresende bleibt gespeichert und wird nicht als Einspeisung oder Eigenverbrauch gezählt. Energieerhaltung: PV = Direktverbrauch + Batterieabgabe + Verluste + Einspeisung + Endinhalt. Keine Batteriealterung, Standbylast oder unterstündlichen Spitzen. Seit dem direkten Speichervergleich wird der Preis beim Ausschalten im Heizvergleich um den eingegebenen Minderpreis reduziert.
 
 Im Heizungs-Langzeitmodell wird für jedes Jahr der degradierte PV-Ertrag erneut mit dem unveränderten Lastprofil und der Batterie simuliert. Kapazität und Leistung bleiben dabei konstant; Ersatzkosten sind weiterhin frei wählbare Zahlungsannahmen. Investition/Jahresnutzen/Kapitalwert betreffen PV gegenüber derselben Heizung ohne PV. Der Stromsaldo ist Netzbezug minus Einspeiseerlöse, ohne konstanten Grundpreis und ohne Heizungswartung. Einstellungen JSON Schema 2 enthalten beide Rechner; alte Schema-1-Dateien laden mit Startannahmen für den neuen Tab.
 
@@ -77,3 +77,17 @@ Nach Download beider JSON-Antworten kann `python prepare_weather.py ROOF.json WA
 [EU-PVGIS: Stundendaten und Einheiten](https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/pvgis-5-tools/hourly-radiation_en) · [API-Dokumentation](https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en).
 
 Zusätzliche Dateien: `heating_model.py` (Simulation), `heating_ui.py` (Oberfläche und Erklärungen), `test_heating.py` (Energiebilanz und Rechenprüfung), `prepare_weather.py` (Datenaufbereitung), `weather_2023.csv` (öffentliche Wetterdaten, keine Haus-Messdaten).
+
+## Direkter Speichervergleich · Erweiterung 08.11.2026
+
+Im Heizungs-Tab wird für die ausgewählte Heizvariante und Verschattung immer dieselbe PV-Anlage mit/ohne Batterie gegenübergestellt. Der Betriebsschalter steuert die übrigen Heizungsdiagramme; der Direktvergleich rechnet stets beide Seiten.
+
+- Minderpreis ohne Batterie: einstellbarer vollständiger Preisunterschied gegenüber Rons ursprünglichem 7-kWh-Angebot. 3.650 € Startwert ist nur die bisherige Speicherposition, kein bestätigtes Alternativangebot.
+- Klassen 7/14/21 kWh: nutzbar 6,9/13,8/20,7 kWh. Leistungspresets 3,5/7/10 kW. Hersteller nennt für die 21er-Batterie bis 10,5 kW; 10 kW ist unsere Systembegrenzungsannahme, kein Nachweis der tatsächlichen Leistung am angebotenen Wechselrichter. Lade-/Entladeleistung bleiben anpassbar. [Huawei-Datenblatt](https://solar.huawei.com/admin/asset/v1/pro/view/8da96b44831242eea1ddc3f4bf94a518.pdf).
+- Aufpreise 14 und 21 kWh: separat einstellbar, jeweils gegenüber dem ursprünglichen 7-kWh-Angebot. Startwerte 0 € sind unbekannte Preise, kein Angebot; Warnhinweis bei Auswahl einer größeren Klasse ohne Preis.
+- Investition mit Batterie = Basisinvestition + Klassen-Aufpreis. Ohne Batterie = Basisinvestition − Minderpreis. Mehrpreis Batterie = Minderpreis + Klassen-Aufpreis.
+- Gemeinsame PV-Betriebs-/Ersatzkosten von links bleiben auf beiden Seiten gleich. Nur explizite zusätzliche jährliche Batterie- und Ersatzkosten belasten die Batterie zusätzlich; gleiche Kosten nicht doppelt eintragen.
+- Gesamt-PV-Amortisation und Kapitalwert werden für beide Ausführungen berechnet. Zusätzlich wird die Differenz betrachtet: eigener Speicher-Kapitalwert, einfacher sowie modellierter Rückzahlungszeitpunkt und nominaler/abgezinster Mehrwert über die Jahre. Diese Differenz enthält entgangene Einspeiseerlöse, Speicherverluste und zusätzliche Batteriekosten.
+- Einstellungen exportieren als Schema 3. Alte Schema-1/2-Dateien bleiben lesbar; freie alte Kapazitäten werden auf die nächstliegende 7/14/21-Klasse übertragen und im Importhinweis kenntlich gemacht.
+
+Neue Dateien: `storage_model.py`, `storage_ui.py`, `test_storage.py`, `.python-version`. Tests prüfen auch Preisunterschiede, gemeinsame versus zusätzliche Ersatzkosten und Einstellungen der Speicherklassen.

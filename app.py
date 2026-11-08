@@ -10,9 +10,11 @@ import streamlit as st
 from model import Assumptions, calculate, validate
 from heating_ui import HEAT_DEFAULTS, draw as draw_heating
 from heating_model import Heating, validate_heating
+from storage_model import Storage, SIZES, validate_storage
+from storage_ui import STORAGE_DEFAULTS
 
 st.set_page_config(page_title="PV · Dach & Fassade", page_icon="☀️", layout="wide")
-DEFAULTS = dict(asdict(Assumptions()), shades=[0., 10., 20., 30.], shares=[40., 55., 70.], **HEAT_DEFAULTS)
+DEFAULTS = dict(asdict(Assumptions()), shades=[0., 10., 20., 30.], shares=[40., 55., 70.], **HEAT_DEFAULTS, **STORAGE_DEFAULTS)
 for key, value in DEFAULTS.items():
     st.session_state.setdefault(key, value)
 
@@ -29,14 +31,24 @@ def load_settings():
     try:
         data = json.loads(st.session_state.settings_upload.getvalue())
         schema = data.get("schema")
-        if schema not in (1, 2):
+        if schema not in (1, 2, 3):
             raise ValueError("Unbekanntes Einstellungsformat.")
         data = data["settings"]
         if schema == 1:
             data = dict(HEAT_DEFAULTS, **data)
+        if schema in (1, 2):
+            # Older free-form capacity migrates to the nearest supported class.
+            size = min(SIZES, key=lambda k: abs(SIZES[k][0]-data["h_capacity"]))
+            data = dict(STORAGE_DEFAULTS, **data, b_size=size)
+            data["h_capacity"] = SIZES[size][0]
         if set(data) != set(DEFAULTS):
             raise ValueError("Unvollständige oder unbekannte Felder.")
         a = Assumptions(**{k: data[k] for k in asdict(Assumptions())})
+        validate_storage(Storage(**{k: data[f"b_{k}"] for k in asdict(Storage())}), a)
+        if not isinstance(data["h_battery"], bool) or not isinstance(data["h_central_cooling"], bool):
+            raise ValueError("Batterie-/Kühlschalter müssen Wahrheitswerte sein.")
+        if abs(data["h_capacity"]-SIZES[data["b_size"]][0]) > .00001:
+            raise ValueError("Kapazität passt nicht zur gewählten Speicherklasse.")
         validate_heating(Heating(**{k: data[f"h_{k}"] for k in asdict(Heating())}))
         for k in ("household", "heat", "hot_water", "cooling"):
             if not 0 <= data[f"h_{k}"] <= (100000 if k in ("household", "heat") else 50000):
@@ -71,7 +83,7 @@ def load_settings():
             st.session_state[f"shade_{i}"] = float(v)
         for i, v in enumerate(data["shares"]):
             st.session_state[f"share_{i}"] = float(v)
-        st.session_state.import_message = "Einstellungen geladen."
+        st.session_state.import_message = "Einstellungen geladen." + (" Ältere Speichergröße auf die nächste 7/14/21-kWh-Klasse übertragen." if schema < 3 else "")
     except (ValueError, TypeError, KeyError, AttributeError) as exc:
         st.session_state.import_message = f"Import abgelehnt: {exc}"
 
@@ -241,8 +253,8 @@ with tab_heat:
 with st.expander("Jahresrechnung · ausgewählte Kombination"):
     annual = pd.DataFrame(r["rows"]).rename(columns={"year": "Jahr", "generation": "PV_kWh", "own": "Eigenverbrauch_kWh", "losses": "Speicherverlust_kWh", "export": "Einspeisung_kWh", "avoided": "Bezug_gespart_EUR", "feed": "Verguetung_EUR", "operating": "Betrieb_EUR", "replacement": "Ersatz_EUR", "net": "Netto_EUR", "discounted_net": "Netto_abgezinst_EUR", "balance": "Saldo_EUR", "discounted_balance": "Saldo_abgezinst_EUR"})
     st.dataframe(annual.round(2), hide_index=True)
-settings = dict(asdict(a), shades=shades, shares=shares, **{k: st.session_state[k] for k in HEAT_DEFAULTS})
+settings = dict(asdict(a), shades=shades, shares=shares, **{k: st.session_state[k] for k in HEAT_DEFAULTS}, **{k: st.session_state[k] for k in STORAGE_DEFAULTS})
 left, middle, right = st.columns(3)
-left.download_button("Einstellungen · JSON", json.dumps({"schema": 2, "settings": settings}, ensure_ascii=False, indent=2), "pv-einstellungen.json", "application/json")
+left.download_button("Einstellungen · JSON", json.dumps({"schema": 3, "settings": settings}, ensure_ascii=False, indent=2), "pv-einstellungen.json", "application/json")
 middle.download_button("12 Varianten · CSV", pd.DataFrame(export_rows).to_csv(index=False, sep=";", decimal=","), "pv-varianten.csv", "text/csv")
 right.download_button("Jahresrechnung · CSV", annual.to_csv(index=False, sep=";", decimal=","), "pv-jahresrechnung.csv", "text/csv")

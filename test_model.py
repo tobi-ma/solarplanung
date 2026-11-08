@@ -68,6 +68,18 @@ class UITests(unittest.TestCase):
         self.assertFalse(app.session_state["h_battery"])
         self.assertEqual(len(app.warning), 0)
 
+    def test_storage_size_and_price_controls(self):
+        from streamlit.testing.v1 import AppTest
+        app = AppTest.from_file(str(Path(__file__).with_name("app.py"))).run(timeout=30)
+        app.selectbox(key="b_size").select(14).run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(app.number_input(key="h_capacity").value, 13.8)
+        self.assertEqual(app.number_input(key="h_charge_power").value, 7.)
+        app.number_input(key="b_discount").set_value(3000.)
+        app.number_input(key="b_upgrade14").set_value(2000.).run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(app.session_state["b_discount"], 3000.)
+
 
 if __name__ == "__main__":
     unittest.main()

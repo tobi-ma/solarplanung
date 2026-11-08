@@ -137,7 +137,7 @@ def annual_totals(h, variant, generation, shading, degradation, years):
                  for year in range(years))
 
 
-def financial(h, variant, a, shading):
+def financial(h, variant, a, shading, extra_annual=0., extra_replacement=0., extra_replacement_year=13):
     """Re-simulate battery dispatch as PV degrades, with unchanged useful heat."""
     from model import sustained_payback
     balance = discounted = -a.investment
@@ -145,8 +145,10 @@ def financial(h, variant, a, shading):
     for year, t in enumerate(annual_totals(h, variant, a.generation, shading, a.degradation, a.years), 1):
         avoided = (t["direct"]+t["discharge"])*a.power_price/100*(1+a.power_growth/100)**(year-1)
         feed = t["export"]*a.feed_price/100*(1-a.feed_discount/100) if year <= a.feed_years else 0.
-        operating = a.annual_cost*(1+a.cost_growth/100)**(year-1)
+        operating = (a.annual_cost+extra_annual)*(1+a.cost_growth/100)**(year-1)
         replacement = a.replacement_cost if a.replacement_mode == "Mit Ersatzkosten" and year == a.replacement_year else 0.
+        if year == extra_replacement_year:
+            replacement += extra_replacement
         net = avoided+feed-operating-replacement
         balance += net
         discounted += net/(1+a.discount/100)**year
