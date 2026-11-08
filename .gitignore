@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+.DS_Store
+*.log
+pv-einstellungen*.json
+pv-varianten*.csv
+pv-jahresrechnung*.csv
