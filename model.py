@@ -1,6 +1,17 @@
 """Transparent annual PV cash-flow model; no external dependencies or network calls."""
 from dataclasses import asdict, dataclass
 import math
+import re
+
+
+def parse_shading(value):
+    """Accept a dropdown label or a decimal percentage, including German commas."""
+    if not isinstance(value, str) or not re.fullmatch(r"\s*(?:\d+(?:[.,]\d*)?|[.,]\d+)\s*%?\s*", value):
+        raise ValueError("Verschattung: Bitte einen Wert von 0 bis 100 eingeben, z. B. 12,5 %.")
+    number = float(value.strip().removesuffix("%").strip().replace(",", "."))
+    if not math.isfinite(number) or not 0 <= number <= 100:
+        raise ValueError("Verschattung muss zwischen 0 und 100 % liegen.")
+    return number
 
 
 @dataclass

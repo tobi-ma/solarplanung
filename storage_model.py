@@ -23,8 +23,9 @@ def comparison_rows(comp):
 class Storage:
     size: int = 7
     discount: float = 3650.
-    upgrade14: float = 0.
-    upgrade21: float = 0.
+    # Market-based planning allowances, not installer quotes; see README sources.
+    upgrade14: float = 2500.
+    upgrade21: float = 5000.
     annual_extra: float = 0.
     replacement_extra: float = 0.
     replacement_year: int = 13

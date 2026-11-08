@@ -34,7 +34,7 @@ class StorageTests(unittest.TestCase):
 
     def test_difference_row_reconciles(self):
         comp = compare_storage(Heating(capacity=20.7, charge_power=10., discharge_power=10.),
-                               VARIANTS[0], Assumptions(), 30., Storage(size=21))
+                               VARIANTS[0], Assumptions(), 30., Storage(size=21, upgrade21=0.))
         rows = comparison_rows(comp)
         self.assertEqual(len(rows), 3)
         for key in ("investment", "annual_net", "npv"):

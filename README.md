@@ -32,7 +32,7 @@ git push -u origin main
 
 ## Bedienung des Boards
 
-Auf der Startseite Heizart, Speichergröße (ohne / 7 / 14 / 21 kWh), Verschattung und Angebotspreise einstellen. Direkt darunter stehen Gesamtinvestition, jährlicher PV-Nettonutzen, Amortisation und Kapitalwert derselben Anlagenkonfiguration. ›Meine Rechnung‹ zeigt genau deren Jahreskurve und CSV-Jahresrechnung. Links stehen Tarife, Betrachtungszeitraum und weitere Finanzannahmen. Verbrauch, Wirkungsgrade und Batterieleistung liegen im aufklappbaren Bereich ›Weitere Annahmen‹ auf der Startseite.
+Auf der Startseite Heizart, Speichergröße (ohne / 7 / 14 / 21 kWh), Verschattung und Angebotspreise einstellen. Das Verschattungs-Dropdown bietet 0/10/20/30 %; eigene Werte wie `12,5` oder `12.5 %` eintippen und mit Enter bestätigen (0 bis 100 %). Direkt darunter stehen Gesamtinvestition, jährlicher PV-Nettonutzen, Amortisation und Kapitalwert derselben Anlagenkonfiguration. ›Meine Rechnung‹ zeigt genau deren Jahreskurve und CSV-Jahresrechnung. Links stehen Tarife, Betrachtungszeitraum und weitere Finanzannahmen. Verbrauch, Wirkungsgrade und Batterieleistung liegen im aufklappbaren Bereich ›Weitere Annahmen‹ auf der Startseite.
 
 Zusätzliche Tabs heißen ausdrücklich ›Einzelanalyse · Speicher‹, ›Einzelanalyse · Heizarten‹ und ›Einzelanalyse · feste Quote‹. Sie untersuchen Alternativen zur Hauptkonfiguration. Änderungen an frei vorgegebenen Quoten beeinflussen die Hauptrechnung nicht. Alle Hauptkennzahlen verwenden dagegen die stündliche Heizungs-/Speicherrechnung und ihren tatsächlichen Angebotspreis.
 
@@ -88,7 +88,7 @@ Im Heizungs-Tab wird für die ausgewählte Heizvariante und Verschattung immer d
 
 - Minderpreis ohne Batterie: einstellbarer vollständiger Preisunterschied gegenüber Rons ursprünglichem 7-kWh-Angebot. 3.650 € Startwert ist nur die bisherige Speicherposition, kein bestätigtes Alternativangebot.
 - Klassen 7/14/21 kWh: nutzbar 6,9/13,8/20,7 kWh. Leistungspresets 3,5/7/10 kW. Hersteller nennt für die 21er-Batterie bis 10,5 kW; 10 kW ist unsere Systembegrenzungsannahme, kein Nachweis der tatsächlichen Leistung am angebotenen Wechselrichter. Lade-/Entladeleistung bleiben anpassbar. [Huawei-Datenblatt](https://solar.huawei.com/admin/asset/v1/pro/view/8da96b44831242eea1ddc3f4bf94a518.pdf).
-- Aufpreise 14 und 21 kWh: separat einstellbar, jeweils gegenüber dem ursprünglichen 7-kWh-Angebot. Startwerte 0 € sind unbekannte Preise, kein Angebot; Warnhinweis bei Auswahl einer größeren Klasse ohne Preis.
+- Aufpreise 14 und 21 kWh: separat einstellbar, jeweils gegenüber dem ursprünglichen 7-kWh-Angebot. Startannahmen **2.500 € / 5.000 €**, keine bestätigten Preise von Ron; Herleitung und Quellen unten. Warnhinweis bei Auswahl einer größeren Klasse mit 0 € Aufpreis.
 - Investition mit Batterie = Basisinvestition + Klassen-Aufpreis. Ohne Batterie = Basisinvestition − Minderpreis. Mehrpreis Batterie = Minderpreis + Klassen-Aufpreis.
 - Gemeinsame PV-Betriebs-/Ersatzkosten von links bleiben auf beiden Seiten gleich. Nur explizite zusätzliche jährliche Batterie- und Ersatzkosten belasten die Batterie zusätzlich; gleiche Kosten nicht doppelt eintragen.
 - Gesamt-PV-Amortisation und Kapitalwert werden für beide Ausführungen berechnet. Zusätzlich wird die Differenz betrachtet: eigener Speicher-Kapitalwert, einfacher sowie modellierter Rückzahlungszeitpunkt und nominaler/abgezinster Mehrwert über die Jahre. Diese Differenz enthält entgangene Einspeiseerlöse, Speicherverluste und zusätzliche Batteriekosten.
@@ -103,3 +103,18 @@ Der Direktvergleich zeigt die wichtigsten Werte in einer kompakten Tabelle: Inve
 ### Konfigurator als Startseite
 
 Es gibt seit dieser Fortschreibung eine maßgebliche Hauptrechnung. Die früher auf der Startseite stehende 12er-Quotentabelle ist jetzt eine ausdrücklich vereinfachte Einzelanalyse. Deren Fehler oder unwirksame Quoten blockieren die Hauptrechnung nicht. Die Hauptkonfiguration steuert dieselben `Assumptions`-, `Heating`- und `Storage`-Parameter für Kennzahlen, Kurve, Jahresdaten und Export. Der Haupt-Kapitalwert entspricht damit immer dem letzten abgezinsten Saldo der exportierten Jahresrechnung. Die Heizungsanalyse verwendet dieselbe Auswahl für ihre Detailgrafiken und verändert nur in der gekennzeichneten Vergleichstabelle Heizarten und Verluststufen.
+
+### Marktannahmen für Speicher-Aufpreise · Recherche 08.11.2026
+
+Rons Basisangebot enthält Huawei LUNA2000-7-S1 mit einem Batteriemodul, Steuermodul und Sockel. Für die 14-kWh-Klasse wird ein weiteres **LUNA2000-7-E1**, für die 21-kWh-Klasse werden zwei weitere Module angesetzt; Steuermodul und Sockel werden nicht erneut gekauft. [Huawei-Spezifikationen](https://solar.huawei.com/ae-en/products/LUNA2000-7-14-21-S1/specs/) beschreiben 1/2/3 Batteriemodule je Steuermodul und 6,9/13,8/20,7 kWh nutzbare Energie. Konkrete Kompatibilität und Umfang von Ron bestätigen lassen.
+
+| Beobachteter Einzelmodulpreis (ohne Montage) | Ausgewiesener Preis mit 0 % MwSt. | Versand |
+| --- | ---: | --- |
+| [SolarOutlet · LUNA2000-7-E1](https://solaroutlet.de/products/huawei-luna2000-7-e1-batteriespeicher-6-9-kwh) | 2.029,70 € | 99 € |
+| [mg-solar · LUNA2000-7-E1](https://www.mg-solar-shop.de/huawei-luna2000-7-e1-batteriemodul-6-9-kwh-fuer-luna2000-s1-batteriespeicher) | 2.060,80 € | zusätzlich, hier nicht beziffert |
+
+Preise sind Momentaufnahmen, keine Verfügbarkeits- oder Preiszusage. Wie im Basisangebot wird mit ausgewiesenen 0 % MwSt. gerechnet.
+
+**Unverbindlicher Rechenansatz:** gerundet 2.100 € Material plus 400 € pauschal für Versand, Einbau/Inbetriebnahme und Anbieteraufschlag je zusätzlichem Modul. Daraus **14 kWh: +2.500 €; 21 kWh: +5.000 € insgesamt gegenüber dem 7-kWh-Angebot**. Der Zuschlag ist ausdrücklich geschätzt, kein recherchierter Montagepreis. Bei zwei Modulen können Versand und Montage gemeinsam günstiger ausfallen; Ron kann andere Material- und Paketpreise anbieten.
+
+Diese Annahmen sind die neuen Startwerte der Hauptrechnung und aller darauf aufbauenden Einzelanalysen; sie werden nicht zusätzlich zu den eingegebenen Aufpreisen addiert. Felder tragen ›Preisannahme‹, die Quellen stehen auch im Board unter ›Modell & Quellen‹. Eigene Eingaben und importierte alte JSON-Dateien (auch mit 0 €) werden erhalten. ›Recherchierte Aufpreisannahmen übernehmen‹ setzt nur die beiden Aufpreise auf 2.500/5.000 € zurück. Der JSON-Export bleibt Schema 4 und speichert den tatsächlich gewählten numerischen Verschattungswert sowie beide eingetragenen Aufpreise.

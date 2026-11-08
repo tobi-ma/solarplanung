@@ -1,10 +1,17 @@
 from dataclasses import replace
 from pathlib import Path
 import unittest
-from model import Assumptions, calculate, sustained_payback
+from model import Assumptions, calculate, sustained_payback, parse_shading
 
 
 class ModelTests(unittest.TestCase):
+    def test_custom_shading(self):
+        for text, value in (("0 %", 0.), ("30 %", 30.), ("12,5", 12.5), ("12.5 %", 12.5), ("100%", 100.)):
+            self.assertEqual(parse_shading(text), value)
+        for text in (None, "", "viel", "NaN", "inf", "-1", "101 %", "12,5,6", "10%%"):
+            with self.assertRaises(ValueError):
+                parse_shading(text)
+
     def test_energy_and_first_year(self):
         a = Assumptions()
         r = calculate(a, 0, 55)
@@ -76,10 +83,29 @@ class UITests(unittest.TestCase):
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.number_input(key="h_capacity").value, 13.8)
         self.assertEqual(app.number_input(key="h_charge_power").value, 7.)
+        self.assertEqual(app.number_input(key="b_upgrade14").value, 2500.)
+        self.assertEqual(app.number_input(key="b_upgrade21").value, 5000.)
+        self.assertEqual(app.metric[0].value, "20.590 €")
         app.number_input(key="b_discount").set_value(3000.)
         app.number_input(key="b_upgrade14").set_value(2000.).run(timeout=30)
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.session_state["b_discount"], 3000.)
+        app.button[0].click().run(timeout=30)
+        self.assertEqual(app.number_input(key="b_upgrade14").value, 2500.)
+        self.assertEqual(app.session_state["b_discount"], 3000.)
+
+    def test_shading_dropdown(self):
+        from streamlit.testing.v1 import AppTest
+        app = AppTest.from_file(str(Path(__file__).with_name("app.py"))).run(timeout=30)
+        # AppTest cannot send accept_new_options values; custom typing is checked in-browser.
+        app.selectbox(key="plant_shade_input").select("10 %").run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(app.session_state["plant_shade"], 10.)
+        app.number_input(key="scaffold").set_value(0.).run(timeout=30)
+        self.assertEqual(app.session_state["plant_shade"], 10.)
+        app.selectbox(key="plant_shade_input").select("20 %").run(timeout=30)
+        self.assertEqual(len(app.error), 0)
+        self.assertEqual(app.session_state["plant_shade"], 20.)
 
     def test_single_configuration_drives_metrics_and_year_table(self):
         from streamlit.testing.v1 import AppTest
@@ -88,7 +114,7 @@ class UITests(unittest.TestCase):
         app = AppTest.from_file(str(Path(__file__).with_name("app.py"))).run(timeout=30)
         app.selectbox(key="plant_variant").select(VARIANTS[2])
         app.selectbox(key="plant_storage").select(21)
-        app.number_input(key="plant_shade").set_value(30.)
+        app.selectbox(key="plant_shade_input").select("30 %")
         app.number_input(key="b_upgrade21").set_value(2500.).run(timeout=30)
         self.assertEqual(len(app.exception), 0)
         expected = storage_financial(Heating(capacity=20.7,charge_power=10.,discharge_power=10.),VARIANTS[2],Assumptions(),30.,Storage(size=21,upgrade21=2500.))

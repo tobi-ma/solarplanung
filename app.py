@@ -4,11 +4,11 @@ import json
 import altair as alt
 import pandas as pd
 import streamlit as st
-from model import Assumptions, calculate, validate
+from model import Assumptions, calculate, validate, parse_shading
 from heating_model import Heating, VARIANTS, simulate, validate_heating
 from heating_ui import HEAT_DEFAULTS, heating_settings, controls as heating_controls, draw as draw_heating
 from storage_model import Storage, SIZES, validate_storage, priced_assumptions, storage_financial
-from storage_ui import STORAGE_DEFAULTS, apply_size, settings as storage_settings, draw as draw_storage
+from storage_ui import STORAGE_DEFAULTS, PRICE_NOTE, apply_size, apply_price_assumptions, settings as storage_settings, draw as draw_storage
 
 st.set_page_config(page_title="PV · Meine Anlagenrechnung",page_icon="☀️",layout="wide")
 DEFAULTS = dict(asdict(Assumptions()),shades=[0.,10.,20.,30.],shares=[40.,55.,70.],**HEAT_DEFAULTS,**STORAGE_DEFAULTS,
@@ -82,6 +82,7 @@ def load_settings():
             for share in data["shares"]:
                 validate(a,shade,share)
         st.session_state.update(data)
+        st.session_state.plant_shade_input = f"{data['plant_shade']:g} %"
         for i,value in enumerate(data["shades"]):
             st.session_state[f"shade_{i}"] = float(value)
         for i,value in enumerate(data["shares"]):
@@ -101,7 +102,11 @@ c1,c2,c3 = st.columns([2,1,1])
 variant = c1.selectbox("Heizart",VARIANTS,key="plant_variant")
 c2.selectbox("Speichergröße",[0,7,14,21],key="plant_storage",on_change=change_storage,
              format_func=lambda n:"Ohne Speicher" if n == 0 else f"{n} kWh-Klasse")
-shade = c3.number_input("Ertragsverlust durch Verschattung · %",0.,100.,step=5.,key="plant_shade")
+st.session_state.setdefault("plant_shade_input",f"{st.session_state.plant_shade:g} %")
+shade_input = c3.selectbox("Ertragsverlust durch Verschattung · %",["0 %","10 %","20 %","30 %"],
+                          key="plant_shade_input",accept_new_options=True,
+                          help="Vorgabe auswählen oder eigenen Wert eintippen (z. B. 12,5) und mit Enter bestätigen. Erlaubt: 0 bis 100 %.")
+c3.caption("0 / 10 / 20 / 30 % wählen oder eigenen Wert eintippen + Enter.")
 with st.expander("Angebot und Anlagengröße einstellen",expanded=True):
     c1,c2,c3 = st.columns(3)
     with c1:
@@ -111,9 +116,12 @@ with st.expander("Angebot und Anlagengröße einstellen",expanded=True):
         number("Minderpreis ohne Speicher · €","b_discount")
         number("Jahresertrag vor Verschattung · kWh","generation",step=50.)
     with c3:
-        number("Aufpreis 14 kWh gegenüber Basis · €","b_upgrade14")
-        number("Aufpreis 21 kWh gegenüber Basis · €","b_upgrade21")
-    st.caption("Der gewählte Speicher bestimmt den Gesamtpreis: Basis + Aufpreis bzw. Basis − Minderpreis. Größere Speicher brauchen einen eigenen Angebotspreis. Der Jahresertrag bestimmt die PV-Erzeugung; Dachwinkel werden hier nicht neu simuliert.")
+        number("Aufpreis 14 kWh · Preisannahme · €","b_upgrade14")
+        number("Aufpreis 21 kWh · Preisannahme · €","b_upgrade21")
+    st.caption(PRICE_NOTE)
+    st.button("Recherchierte Aufpreisannahmen übernehmen",on_click=apply_price_assumptions,
+              help="Setzt nur die beiden Aufpreise auf 2.500 / 5.000 €. Praktisch bei früher gespeicherten Einstellungen mit 0 €.")
+    st.caption("Der gewählte Speicher bestimmt den Gesamtpreis: Basis + Aufpreis bzw. Basis − Minderpreis. Preise und Herleitung siehe ›Modell & Quellen‹. Der Jahresertrag bestimmt die PV-Erzeugung; Dachwinkel werden hier nicht neu simuliert.")
 
 with st.sidebar:
     st.title("Tarife & Rechenannahmen")
@@ -144,6 +152,8 @@ heating_controls(primary=True)
 a = Assumptions(**{k:st.session_state[k] for k in asdict(Assumptions())})
 h,s = heating_settings(),storage_settings()
 try:
+    shade = parse_shading(shade_input)
+    st.session_state.plant_shade = shade
     validate(a,shade,0.)
     validate_heating(h)
     validate_storage(s,a)
@@ -214,6 +224,14 @@ with quota_tab:
         st.error(f"Nur Einzelanalyse: {exc}")
     st.caption("Rechnet mit dem Basisangebot inklusive 7-kWh-Speicher, ohne Klassen-Aufpreis/Minderpreis. Keine Aussage über die aktuell gewählte Anlagenkonfiguration.")
 with sources:
+    st.markdown("""**Speicher-Aufpreise · unverbindliche Annahmen, Recherche 08.11.2026.**
+
+    Für 14 kWh ist gegenüber Rons 7-kWh-Speicher ein zusätzliches Huawei LUNA2000-7-E1-Modul angesetzt, für 21 kWh zwei. Das bereits angebotene Steuermodul und der Sockel werden weiterverwendet; [Huawei beschreibt 1/2/3 Batteriemodule je Steuermodul](https://solar.huawei.com/ae-en/products/LUNA2000-7-14-21-S1/specs/).
+
+    Beobachtete Einzelmodulpreise: [SolarOutlet 2.029,70 € plus 99 € Versand](https://solaroutlet.de/products/huawei-luna2000-7-e1-batteriespeicher-6-9-kwh), [mg-solar 2.060,80 € plus Versand](https://www.mg-solar-shop.de/huawei-luna2000-7-e1-batteriemodul-6-9-kwh-fuer-luna2000-s1-batteriespeicher), jeweils mit ausgewiesenen 0 % MwSt. wie im Basisangebot, ohne Montage. Preise können sich ändern.
+
+    **Rechenannahmen:** rund 2.100 € Material + 400 € pauschaler Zuschlag für Versand, Einbau/Inbetriebnahme und Anbieteraufschlag je zusätzlichem Modul = **2.500 € für 14 kWh bzw. 5.000 € für 21 kWh insgesamt gegenüber 7 kWh**. Der Zuschlag ist geschätzt, kein recherchierter Handwerkerpreis. Ron muss Aufpreis, Lieferumfang und Eignung der vorhandenen Komponenten bestätigen. Diese Werte gehen bereits in die Hauptrechnung ein; eigene Eingaben und ältere JSON-Dateien behalten ihre eingetragenen Preise.
+    """)
     st.markdown("""**Eine Konfiguration, eine Hauptrechnung.** Investition, Amortisation, Kapitalwert, Jahreskurve und Export verwenden dieselbe Heizart, Speichergröße und Verschattung. Einzelanalysen variieren ausdrücklich benannte Annahmen.
 
     PVGIS-Wetterfolge 2023 mit 8.760 Stunden, normiert auf die Monatsmittel der bisherigen Ertragsabschätzung (7.060 kWh/Jahr als Startwert). Dach 5,58 kWp, 38° Südwest; Fassade 2,79 kWp, 90° Südost. Keine lokale Baum-/Gebäudeverschattung; der eingestellte Abschlag wirkt pauschal. Verbrauch und Effizienz sind Modellannahmen, keine Messung des Hauses.

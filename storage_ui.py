@@ -6,6 +6,12 @@ import streamlit as st
 from storage_model import Storage, SIZES, compare_storage, comparison_rows
 
 STORAGE_DEFAULTS = {f"b_{k}": v for k, v in asdict(Storage()).items()}
+PRICE_NOTE = "Startannahmen: +2.500 € für 14 kWh, +5.000 € für 21 kWh gegenüber 7 kWh. Aus Marktpreisen zusätzlicher Huawei-Module plus geschätztem Versand-/Einbauzuschlag abgeleitet; keine bestätigten Aufpreise von Ron. Beide Werte sind frei änderbar."
+
+
+def apply_price_assumptions():
+    for key in ("b_upgrade14", "b_upgrade21"):
+        st.session_state[key] = STORAGE_DEFAULTS[key]
 
 
 def settings():
@@ -33,9 +39,9 @@ def controls(show_size=True, show_prices=True):
         st.number_input("Tatsächlicher Minderpreis ohne Speicher gegenüber 7-kWh-Angebot · €", 0., 1000000., step=100., key="b_discount")
         st.caption("Startwert 3.650 € = bisherige Speicherposition, noch kein bestätigter Minderpreis. Hier den vollständigen Preisunterschied einschließlich entfallender Montage/Zubehör eintragen.")
         c1, c2 = st.columns(2)
-        c1.number_input("Aufpreis 14-kWh-Klasse gegenüber 7-kWh-Angebot · €", 0., 1000000., step=100., key="b_upgrade14")
-        c2.number_input("Aufpreis 21-kWh-Klasse gegenüber 7-kWh-Angebot · €", 0., 1000000., step=100., key="b_upgrade21")
-        st.caption("Aufpreise sind vollständige Preisunterschiede, keine Preise je zusätzlichem Modul. 0 € bedeutet eine unbestätigte Annahme, kein kostenloses Angebot.")
+        c1.number_input("Aufpreis 14-kWh-Klasse · Preisannahme · €", 0., 1000000., step=100., key="b_upgrade14")
+        c2.number_input("Aufpreis 21-kWh-Klasse · Preisannahme · €", 0., 1000000., step=100., key="b_upgrade21")
+        st.caption(PRICE_NOTE)
     c1, c2, c3 = st.columns(3)
     c1.number_input("Zusätzliche Batteriekosten · €/Jahr", 0., 1000000., step=10., key="b_annual_extra")
     c2.number_input("Zusätzliche Batterie-Ersatzkosten · €", 0., 1000000., step=100., key="b_replacement_extra")
