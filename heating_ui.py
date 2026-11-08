@@ -16,10 +16,8 @@ def heating_settings():
     return Heating(**{k: st.session_state[f"h_{k}"] for k in asdict(Heating())})
 
 
-def draw(a, shades, money, duration):
-    st.subheader("Heizung, Kühlung & Speicher")
-    st.info("Planungsmodell: PV-Zeitverlauf und Außentemperatur aus PVGIS 2023. Die monatlichen PV-Mengen sind auf die bisherige langjährige Abschätzung normiert. Verbrauch und Effizienz sind Annahmen, keine Messung eures Hauses.")
-    with st.expander("Verbrauchs- und Speicherannahmen einstellen", expanded=True):
+def controls(primary=False):
+    with st.expander("Weitere Annahmen · Verbrauch, Heiztechnik und Batterie", expanded=False):
         left, right = st.columns(2)
         with left:
             st.number_input("Haushaltsstrom ohne Heizung/Kühlung · kWh/Jahr", 0., 100000., step=100., key="h_household")
@@ -36,14 +34,20 @@ def draw(a, shades, money, duration):
             st.number_input("Split-Heizanteil · Zentral-WP + Splits · %", 0., 100., step=5., key="h_hybrid_split_fraction")
             st.checkbox("Zentrale WP kann die angesetzte Kühlung liefern", key="h_central_cooling")
             st.caption("JAZ/SEER sind einstellbare Jahreswirkungsgrade. Der Raumwärmebedarf ist für alle Varianten gleich und wird auf die Geräte aufgeteilt. Effizienz ist keine bestätigte Geräteeigenschaft.")
-        st.checkbox("Batterie verwenden", key="h_battery")
-        storage_controls()
+        if not primary:
+            st.checkbox("Batterie verwenden", key="h_battery")
+        storage_controls(show_size=not primary, show_prices=not primary)
         c1, c2, c3, c4 = st.columns(4)
         c1.number_input("Nutzbare Kapazität · kWh", 0., 100., step=.1, key="h_capacity", disabled=True)
         c2.number_input("Ladeleistung · kW", 0., 50., step=.1, key="h_charge_power")
         c3.number_input("Entladeleistung · kW", 0., 50., step=.1, key="h_discharge_power")
         c4.number_input("Speicher-Rundlaufwirkungsgrad · %", 1., 100., step=1., key="h_round_trip")
         st.caption("Zuerst direkter PV-Verbrauch, dann Überschussladung, später Entladung bei Strombedarf. Keine Netzladung. Der pauschale Speicherverlust von links gilt nur im bisherigen Quotenmodell; hier ersetzen ihn die simulierten Lade-/Entladeverluste.")
+def draw(a, shades, money, duration, selection=None, show_controls=True, include_storage=True):
+    st.subheader("Heizvarianten und Stromverbrauch")
+    st.caption("PV-Zeitverlauf und Temperatur aus PVGIS 2023, monatlich auf die bisherige Ertragsabschätzung normiert. Verbrauch und Effizienz sind veränderbare Annahmen.")
+    if show_controls:
+        controls()
     h = heating_settings()
     s = storage_settings()
     try:
@@ -74,10 +78,14 @@ def draw(a, shades, money, duration):
     st.dataframe(pd.DataFrame(records).round(1), hide_index=True, width="stretch")
     st.caption("Stromsaldo = Kosten des verbleibenden Netzbezugs minus Einspeiseerlöse, ohne unveränderten Grundpreis und Heizungswartung. PV-Nutzen = Vorteil gegenüber derselben Heizung ohne PV, abzüglich PV-Betriebskosten. Ein höherer Strombedarf kann den PV-Nutzen steigern und trotzdem höhere Gesamtkosten verursachen.")
     st.caption("PV-Amortisation/Kapitalwert verwenden die PV-Anfangsinvestition von links, korrigiert um Minderpreis ohne Speicher bzw. Aufpreis der gewählten Klasse. Heizungsinvestitionen fehlen weiterhin. Pro Jahr wird die Stundenbilanz mit sinkendem PV-Ertrag neu gerechnet; Batteriekapazität bleibt konstant.")
-    c1, c2 = st.columns(2)
-    shade = c1.selectbox("Heizvergleich · Ertragsverlust", shades, format_func=lambda v: f"{v:g} %", key="heat_detail_shade")
-    variant = c2.selectbox("Heizvergleich · Detailvariante", VARIANTS, key="heat_detail_variant")
-    draw_storage(h, variant, a, shade, s, money, duration)
+    if selection is None:
+        c1, c2 = st.columns(2)
+        shade = c1.selectbox("Heizvergleich · Ertragsverlust", shades, format_func=lambda v: f"{v:g} %", key="heat_detail_shade")
+        variant = c2.selectbox("Heizvergleich · Detailvariante", VARIANTS, key="heat_detail_variant")
+    else:
+        shade, variant = selection
+    if include_storage:
+        draw_storage(h, variant, a, shade, s, money, duration)
     st.markdown("**Weitere Betriebsdetails · aktuell gewählter Batterie-Schalter**")
     sim = simulate(h, variant, a.generation, shade, detail=True)
     t = sim["totals"]

@@ -1,260 +1,226 @@
-"""Run: python -m streamlit run app.py --server.address 127.0.0.1"""
+"""One plant configuration drives the main calculation; sensitivity tabs are explicit."""
 from dataclasses import asdict
 import json
-from pathlib import Path
-
 import altair as alt
 import pandas as pd
 import streamlit as st
-
 from model import Assumptions, calculate, validate
-from heating_ui import HEAT_DEFAULTS, draw as draw_heating
-from heating_model import Heating, validate_heating
-from storage_model import Storage, SIZES, validate_storage
-from storage_ui import STORAGE_DEFAULTS
+from heating_model import Heating, VARIANTS, simulate, validate_heating
+from heating_ui import HEAT_DEFAULTS, heating_settings, controls as heating_controls, draw as draw_heating
+from storage_model import Storage, SIZES, validate_storage, priced_assumptions, storage_financial
+from storage_ui import STORAGE_DEFAULTS, apply_size, settings as storage_settings, draw as draw_storage
 
-st.set_page_config(page_title="PV · Dach & Fassade", page_icon="☀️", layout="wide")
-DEFAULTS = dict(asdict(Assumptions()), shades=[0., 10., 20., 30.], shares=[40., 55., 70.], **HEAT_DEFAULTS, **STORAGE_DEFAULTS)
-for key, value in DEFAULTS.items():
-    st.session_state.setdefault(key, value)
+st.set_page_config(page_title="PV · Meine Anlagenrechnung",page_icon="☀️",layout="wide")
+DEFAULTS = dict(asdict(Assumptions()),shades=[0.,10.,20.,30.],shares=[40.,55.,70.],**HEAT_DEFAULTS,**STORAGE_DEFAULTS,
+                plant_variant=VARIANTS[0],plant_storage=7,plant_shade=0.)
+for k,v in DEFAULTS.items():
+    st.session_state.setdefault(k,v)
 
 
 def money(value):
-    return f"{value:,.0f} €".replace(",", ".")
+    return f"{value:,.0f} €".replace(",",".")
 
 
-def duration(value, years):
-    return f"{value:.1f} Jahre".replace(".", ",") if value is not None else f"nicht binnen {years} Jahren"
+def duration(value,years):
+    return f"{value:.1f} Jahre".replace(".",",") if value is not None else f"nicht binnen {years} Jahren"
+
+
+def change_storage():
+    size = st.session_state.plant_storage
+    st.session_state.h_battery = size != 0
+    if size:
+        st.session_state.b_size = size
+        apply_size()
 
 
 def load_settings():
     try:
-        data = json.loads(st.session_state.settings_upload.getvalue())
-        schema = data.get("schema")
-        if schema not in (1, 2, 3):
+        payload = json.loads(st.session_state.settings_upload.getvalue())
+        schema,data = payload["schema"],payload["settings"]
+        if schema not in (1,2,3,4):
             raise ValueError("Unbekanntes Einstellungsformat.")
-        data = data["settings"]
         if schema == 1:
-            data = dict(HEAT_DEFAULTS, **data)
-        if schema in (1, 2):
-            # Older free-form capacity migrates to the nearest supported class.
-            size = min(SIZES, key=lambda k: abs(SIZES[k][0]-data["h_capacity"]))
-            data = dict(STORAGE_DEFAULTS, **data, b_size=size)
-            data["h_capacity"] = SIZES[size][0]
+            data = dict(HEAT_DEFAULTS,**data)
+        if schema <= 2:
+            size = min(SIZES,key=lambda k:abs(SIZES[k][0]-data["h_capacity"]))
+            data = {**STORAGE_DEFAULTS,**data,"b_size":size,"h_capacity":SIZES[size][0]}
+        if schema < 4:
+            data = dict(data,plant_variant=VARIANTS[0],plant_storage=data["b_size"] if data["h_battery"] else 0,plant_shade=0.)
         if set(data) != set(DEFAULTS):
             raise ValueError("Unvollständige oder unbekannte Felder.")
-        a = Assumptions(**{k: data[k] for k in asdict(Assumptions())})
-        validate_storage(Storage(**{k: data[f"b_{k}"] for k in asdict(Storage())}), a)
-        if not isinstance(data["h_battery"], bool) or not isinstance(data["h_central_cooling"], bool):
-            raise ValueError("Batterie-/Kühlschalter müssen Wahrheitswerte sein.")
-        if abs(data["h_capacity"]-SIZES[data["b_size"]][0]) > .00001:
-            raise ValueError("Kapazität passt nicht zur gewählten Speicherklasse.")
-        validate_heating(Heating(**{k: data[f"h_{k}"] for k in asdict(Heating())}))
-        for k in ("household", "heat", "hot_water", "cooling"):
-            if not 0 <= data[f"h_{k}"] <= (100000 if k in ("household", "heat") else 50000):
-                raise ValueError("Wärme-/Verbrauchswert außerhalb des Eingabebereichs.")
-        for k in ("split_jaz", "water_jaz", "dhw_jaz", "seer"):
-            if not 1 <= data[f"h_{k}"] <= 10:
-                raise ValueError("JAZ/SEER außerhalb des Eingabebereichs.")
-        if data["h_capacity"] > 100 or max(data["h_charge_power"], data["h_discharge_power"]) > 50 or data["h_round_trip"] < 1:
-            raise ValueError("Speicherwert außerhalb des Eingabebereichs.")
-        if len(data["shades"]) != 4 or len(data["shares"]) != 3:
-            raise ValueError("Vier Verluststufen und drei Eigenverbrauchsquoten erforderlich.")
+        if data["plant_variant"] not in VARIANTS or data["plant_storage"] not in (0,7,14,21):
+            raise ValueError("Ungültige Anlagenkonfiguration.")
+        if not isinstance(data["h_battery"],bool) or not isinstance(data["h_central_cooling"],bool):
+            raise ValueError("Ungültiger Betriebs-/Kühlschalter.")
+        if data["h_battery"] != (data["plant_storage"] != 0) or (data["plant_storage"] and data["plant_storage"] != data["b_size"]):
+            raise ValueError("Widersprüchliche Speicherangaben.")
+        a = Assumptions(**{k:data[k] for k in asdict(Assumptions())})
+        h = Heating(**{k:data[f"h_{k}"] for k in asdict(Heating())})
+        s = Storage(**{k:data[f"b_{k}"] for k in asdict(Storage())})
+        validate(a,data["plant_shade"],0.)
+        validate_heating(h)
+        validate_storage(s,a)
+        if abs(h.capacity-SIZES[s.size][0]) > .00001:
+            raise ValueError("Kapazität und Speicherklasse passen nicht zusammen.")
+        limits = {"household":100000,"heat":100000,"hot_water":50000,"cooling":50000,"capacity":100,"charge_power":50,"discharge_power":50}
+        if any(not 0 <= data[f"h_{k}"] <= limit for k,limit in limits.items()):
+            raise ValueError("Verbrauch oder Speicherwert außerhalb des Eingabebereichs.")
+        if max(h.split_jaz,h.water_jaz,h.dhw_jaz,h.seer) > 10 or h.round_trip < 1:
+            raise ValueError("JAZ/SEER oder Wirkungsgrad außerhalb des Eingabebereichs.")
+        for k in ("offer","scaffold","extras","grant","generation","annual_cost","replacement_cost"):
+            if not 0 <= data[k] <= 1000000:
+                raise ValueError("Betrag außerhalb des Eingabebereichs.")
+        if any(not 0 <= data[k] <= 200 for k in ("power_price","feed_price")):
+            raise ValueError("Strompreis außerhalb des Eingabebereichs.")
+        if any(not -20 <= data[k] <= 20 for k in ("power_growth","cost_growth")) or not 0 <= a.discount <= 20:
+            raise ValueError("Änderungsrate außerhalb des Eingabebereichs.")
+        if not 1 <= a.replacement_year <= 50 or any(not isinstance(data[k],int) for k in ("years","feed_years","replacement_year")):
+            raise ValueError("Jahresangaben müssen passende Ganzzahlen sein.")
+        if len(data["shades"]) != 4 or len(set(data["shades"])) != 4 or len(data["shares"]) != 3 or len(set(data["shares"])) != 3:
+            raise ValueError("Einzelanalyse braucht vier verschiedene Verluststufen und drei verschiedene Quoten.")
         for shade in data["shades"]:
             for share in data["shares"]:
-                validate(a, shade, share)
-        # Validate against widget ranges before changing any state.
-        for key in ("offer", "scaffold", "extras", "grant", "generation", "annual_cost", "replacement_cost"):
-            if not 0 <= data[key] <= 1000000:
-                raise ValueError(f"{key}: außerhalb des Eingabebereichs.")
-        for key in ("power_price", "feed_price"):
-            if not 0 <= data[key] <= 200:
-                raise ValueError(f"{key}: außerhalb des Eingabebereichs.")
-        for key in ("power_growth", "cost_growth"):
-            if not -20 <= data[key] <= 20:
-                raise ValueError(f"{key}: außerhalb des Eingabebereichs.")
-        if not 0 <= data["discount"] <= 20 or not 1 <= data["replacement_year"] <= 50:
-            raise ValueError("Abzinsung oder Ersatzjahr außerhalb des Eingabebereichs.")
-        for key in ("years", "feed_years", "replacement_year"):
-            if not isinstance(data[key], int):
-                raise ValueError(f"{key}: Ganzzahl erforderlich.")
+                validate(a,shade,share)
         st.session_state.update(data)
-        for i, v in enumerate(data["shades"]):
-            st.session_state[f"shade_{i}"] = float(v)
-        for i, v in enumerate(data["shares"]):
-            st.session_state[f"share_{i}"] = float(v)
-        st.session_state.import_message = "Einstellungen geladen." + (" Ältere Speichergröße auf die nächste 7/14/21-kWh-Klasse übertragen." if schema < 3 else "")
-    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        for i,value in enumerate(data["shades"]):
+            st.session_state[f"shade_{i}"] = float(value)
+        for i,value in enumerate(data["shares"]):
+            st.session_state[f"share_{i}"] = float(value)
+        st.session_state.import_message = "Einstellungen geladen."+(" Alte Datei: Heizart und Ertragsverlust der Hauptrechnung bitte prüfen." if schema < 4 else "")
+    except (ValueError,TypeError,KeyError,AttributeError) as exc:
         st.session_state.import_message = f"Import abgelehnt: {exc}"
 
 
-def number(label, key, low=0., high=1000000., step=100., help=None):
-    return st.number_input(label, min_value=low, max_value=high, step=step, key=key, help=help)
+def number(label,key,low=0.,high=1000000.,step=100.,help=None):
+    return st.number_input(label,min_value=low,max_value=high,step=step,key=key,help=help)
 
+
+st.title("Meine PV-Anlage konfigurieren")
+st.caption("Oben konfigurieren → direkt darunter Amortisation und Kapitalwert ablesen. Alle Ergebnisse der Hauptrechnung gehören zu dieser einen Auswahl.")
+c1,c2,c3 = st.columns([2,1,1])
+variant = c1.selectbox("Heizart",VARIANTS,key="plant_variant")
+c2.selectbox("Speichergröße",[0,7,14,21],key="plant_storage",on_change=change_storage,
+             format_func=lambda n:"Ohne Speicher" if n == 0 else f"{n} kWh-Klasse")
+shade = c3.number_input("Ertragsverlust durch Verschattung · %",0.,100.,step=5.,key="plant_shade")
+with st.expander("Angebot und Anlagengröße einstellen",expanded=True):
+    c1,c2,c3 = st.columns(3)
+    with c1:
+        number("Basisangebot mit 7-kWh-Speicher · €","offer")
+        number("Gerüst · €","scaffold")
+    with c2:
+        number("Minderpreis ohne Speicher · €","b_discount")
+        number("Jahresertrag vor Verschattung · kWh","generation",step=50.)
+    with c3:
+        number("Aufpreis 14 kWh gegenüber Basis · €","b_upgrade14")
+        number("Aufpreis 21 kWh gegenüber Basis · €","b_upgrade21")
+    st.caption("Der gewählte Speicher bestimmt den Gesamtpreis: Basis + Aufpreis bzw. Basis − Minderpreis. Größere Speicher brauchen einen eigenen Angebotspreis. Der Jahresertrag bestimmt die PV-Erzeugung; Dachwinkel werden hier nicht neu simuliert.")
 
 with st.sidebar:
-    st.title("Annahmen")
-    st.caption("Belegt: Angebot und Tarif. Alle übrigen Werte sind veränderbare Szenarien.")
-    with st.expander("Investition · €", expanded=True):
-        number("Angebot inkl. Speicher · belegt", "offer")
-        number("Gerüst · Annahme", "scaffold")
-        number("Weitere Zusatzkosten", "extras")
-        number("Zuschuss / Investitionsminderung", "grant")
-    with st.expander("Erzeugung & Eigenverbrauch", expanded=True):
-        number("Jahresertrag ohne zusätzliche Verschattung · kWh", "generation", step=50.)
-        for i in range(4):
-            st.session_state.setdefault(f"shade_{i}", st.session_state.shades[i])
-            number(f"Verluststufe {i + 1} · %", f"shade_{i}", 0., 100., 1.)
-        for i in range(3):
-            st.session_state.setdefault(f"share_{i}", st.session_state.shares[i])
-            number(f"Eigenverbrauchsquote {i + 1} · %", f"share_{i}", 0., 100., 1.)
-        number("Zusätzliche Speicherverluste · % der PV-Erzeugung", "storage_loss", 0., 100., 1.)
-        st.caption("Eigenverbrauch = Strom, der tatsächlich im Haushalt ankommt. Rest nach Eigenverbrauch und Speicherverlusten = Einspeisung.")
-        st.caption("Die drei Quoten und der pauschale Speicherverlust steuern nur den bisherigen Variantenvergleich. Im Tab ›Heizung & Speicher‹ entstehen diese Werte aus der Stundenrechnung.")
-    with st.expander("Bezug & Einspeisung", expanded=True):
-        number("Arbeitspreis brutto · ct/kWh · dokumentiert", "power_price", 0., 200., .1)
-        number("Strompreisänderung · %/Jahr", "power_growth", -20., 20., .5)
-        st.selectbox("Vergütungsgrundlage", ["2026-Referenz", "Spätere Inbetriebnahme – Annahme", "Eigene Annahme"], key="tariff_basis")
-        number("Einspeisevergütung · ct/kWh", "feed_price", 0., 200., .1)
-        st.number_input("Vergütungsdauer · volle Modelljahre", 0, 50, key="feed_years")
-        number("Abschlag auf Einspeiseerlöse · %", "feed_discount", 0., 100., 1.,
-               help="Pauschales Szenario, z. B. für zeitweise unvergütete Einspeisung. Kein berechneter Abregelungsverlust.")
-    with st.expander("Betrieb, Alterung & Ersatz"):
-        number("Laufende Kosten · €/Jahr", "annual_cost", step=10.)
-        number("Kostensteigerung · %/Jahr", "cost_growth", -20., 20., .5)
-        number("Ertragsrückgang · %/Jahr", "degradation", 0., 100., .1)
-        st.selectbox("Ersatzkostenszenario", ["Mit Ersatzkosten", "Ohne Ersatzkosten"], key="replacement_mode")
-        number("Ersatzkosten · € zum Ersatzzeitpunkt", "replacement_cost")
-        st.number_input("Ersatz im Modelljahr", 1, 50, key="replacement_year")
-    with st.expander("Zeitraum & Abzinsung"):
-        st.number_input("Betrachtungszeitraum · Jahre", 1, 50, key="years")
-        number("Abzinsung · %/Jahr", "discount", 0., 20., .5)
-    st.file_uploader("Gespeicherte Einstellungen laden", type="json", key="settings_upload", on_change=load_settings)
+    st.title("Tarife & Rechenannahmen")
+    number("Arbeitspreis brutto · ct/kWh","power_price",0.,200.,.1)
+    number("Einspeisevergütung · ct/kWh","feed_price",0.,200.,.1)
+    st.number_input("Betrachtungszeitraum · Jahre",1,50,key="years")
+    number("Abzinsung · %/Jahr","discount",0.,20.,.5)
+    with st.expander("Weitere Kosten und Preisentwicklung"):
+        number("Weitere Zusatzkosten · €","extras")
+        number("Zuschuss / Investitionsminderung · €","grant")
+        number("Laufende PV-Kosten · €/Jahr","annual_cost",step=10.)
+        number("Strompreisänderung · %/Jahr","power_growth",-20.,20.,.5)
+        number("Kostensteigerung · %/Jahr","cost_growth",-20.,20.,.5)
+        number("Ertragsrückgang · %/Jahr","degradation",0.,100.,.1)
+        st.selectbox("Gemeinsame PV-Ersatzreserve",["Mit Ersatzkosten","Ohne Ersatzkosten"],key="replacement_mode")
+        number("Gemeinsame Ersatzkosten · €","replacement_cost")
+        st.number_input("Gemeinsamer Ersatz im Modelljahr",1,50,key="replacement_year")
+    with st.expander("Vergütungsgrundlage"):
+        st.selectbox("Grundlage",["2026-Referenz","Spätere Inbetriebnahme – Annahme","Eigene Annahme"],key="tariff_basis")
+        st.number_input("Vergütungsdauer · volle Modelljahre",0,50,key="feed_years")
+        number("Abschlag auf Einspeiseerlöse · %","feed_discount",0.,100.,1.)
+        st.caption("7,70 ct/kWh sind für Inbetriebnahme 01.08.–31.12.2026 bis 10 kWp belegt. Für spätere Inbetriebnahme Satz prüfen; keine Zukunftszusage.")
+    st.file_uploader("Einstellungen laden",type="json",key="settings_upload",on_change=load_settings)
     if "import_message" in st.session_state:
         st.caption(st.session_state.import_message)
 
-st.title("PV · Dach & Fassade")
-st.caption("Amortisation und Szenarien · Planungsstand 08.11.2026 · lokale Berechnung")
-a = Assumptions(**{k: st.session_state[k] for k in asdict(Assumptions())})
-shades = [st.session_state[f"shade_{i}"] for i in range(4)]
-shares = [st.session_state[f"share_{i}"] for i in range(3)]
-st.session_state.shades, st.session_state.shares = shades, shares
+heating_controls(primary=True)
+a = Assumptions(**{k:st.session_state[k] for k in asdict(Assumptions())})
+h,s = heating_settings(),storage_settings()
 try:
-    for shade in shades:
-        for share in shares:
-            validate(a, shade, share)
-    if len(set(shades)) < 4 or len(set(shares)) < 3:
-        raise ValueError("Bitte unterschiedliche Verluststufen und Eigenverbrauchsquoten eingeben.")
+    validate(a,shade,0.)
+    validate_heating(h)
+    validate_storage(s,a)
 except ValueError as exc:
     st.error(str(exc))
     st.stop()
+fin = storage_financial(h,variant,a,shade,s)
+sim = simulate(h,variant,a.generation,shade)
+investment = priced_assumptions(a,s,h.battery).investment
+st.subheader("Ergebnis deiner Anlage")
+storage_label = f"{s.size}-kWh-Speicher ({h.capacity:g} kWh nutzbar)" if h.battery else "ohne Speicher"
+st.caption(f"{variant} · {storage_label} · {shade:g} % Ertragsverlust · {a.generation*(1-shade/100):,.0f} kWh PV/Jahr".replace(",","."))
+c1,c2,c3,c4 = st.columns(4)
+c1.metric("Gesamtinvestition PV",money(investment))
+c2.metric("PV-Nettonutzen · Jahr 1",money(fin["rows"][1]["net"]))
+c3.metric("Amortisation deiner Anlage",duration(fin["payback"],a.years))
+c4.metric(f"Kapitalwert deiner Anlage · {a.years} Jahre",money(fin["npv"]))
+st.caption(f"Amortisation: Wann die gewählte PV-Anlage einschließlich der eingestellten Kosten zurückverdient ist, ohne Abzinsung. Kapitalwert: Überschuss nach {a.years} Jahren mit {a.discount:g} % Abzinsung; positiv = Verzinsungsziel erreicht. Heizungsanschaffungskosten sind mangels vollständiger Angebote nicht enthalten.")
+if h.battery and s.size > 7 and s.upgrade == 0:
+    st.warning("Der größere Speicher wird aktuell mit 0 € Aufpreis gerechnet. Bitte den tatsächlichen Aufpreis oben eintragen.")
+if variant == VARIANTS[1] and h.cooling and not h.central_cooling:
+    st.warning("Diese Zentral-WP-Variante liefert aktuell keine Kühlung. Für gleichen Komfort die Kühlfähigkeit unter ›Weitere Annahmen‹ aktivieren.")
+main,storage_tab,heat_tab,quota_tab,sources = st.tabs(["Meine Rechnung","Einzelanalyse · Speicher","Einzelanalyse · Heizarten","Einzelanalyse · feste Quote","Modell & Quellen"])
+with main:
+    display = st.radio("Zahlungsverlauf deiner Anlage",["Nominal","Abgezinst"],horizontal=True)
+    key = "balance" if display == "Nominal" else "discounted_balance"
+    curve = pd.DataFrame({"Jahr":[r["year"] for r in fin["rows"]],"Saldo €":[r[key] for r in fin["rows"]]})
+    chart = alt.Chart(curve).mark_line(point=True).encode(x=alt.X("Jahr:Q",axis=alt.Axis(tickMinStep=1)),y="Saldo €:Q",tooltip=["Jahr",alt.Tooltip("Saldo €:Q",format=".0f")])
+    zero = alt.Chart(pd.DataFrame({"Saldo €":[0]})).mark_rule(color="gray").encode(y="Saldo €:Q")
+    st.altair_chart((chart+zero).properties(height=300),width="stretch")
+    st.caption("Diese Kurve gehört exakt zur Auswahl oben. Null = Investition zurückverdient. Ein Knick entsteht durch eingestellte Ersatzkosten; diese sind Annahmen, keine vorhergesagten Defekte.")
+    c1,c2,c3 = st.columns(3)
+    c1.metric("Eigenverbrauch der PV",f"{sim['own_pct']:.1f} %")
+    c2.metric("Solar gedeckter Verbrauch",f"{sim['autonomy_pct']:.1f} %")
+    c3.metric("Netzbezug · Jahr 1",f"{sim['totals']['grid']:,.0f} kWh".replace(",","."))
+    st.caption("Eigenverbrauch = Anteil des PV-Stroms, der im Haus ankommt. Solar gedeckter Verbrauch = Anteil eures gesamten Strombedarfs, den die PV abdeckt. Beide Werte entstehen aus derselben Stundenrechnung.")
+    annual = pd.DataFrame(fin["rows"])
+    with st.expander("Jahresrechnung deiner Anlage"):
+        st.dataframe(annual.round(2),hide_index=True,width="stretch")
+    st.download_button("Meine Jahresrechnung · CSV",annual.to_csv(index=False,sep=";",decimal=","),"pv-jahresrechnung.csv","text/csv")
+with storage_tab:
+    st.caption("Einzelanalyse: Hier wird ausschließlich die Batterie verändert. Heizart, PV-Ertrag, Tarife und Lasten bleiben wie in deiner Konfiguration. Die Hauptrechnung oben wird dadurch nicht umgestellt.")
+    draw_storage(h,variant,a,shade,s,money,duration)
+with heat_tab:
+    st.caption("Einzelanalyse: Vergleicht drei Heizarten und vier Ertragsfälle auf Basis deiner übrigen Konfiguration. Einzelne Zeilen sind Alternativen zur Hauptrechnung, keine zusätzlichen Einsparungen.")
+    draw_heating(a,[0.,10.,20.,30.],money,duration,selection=(shade,variant),show_controls=False,include_storage=False)
+with quota_tab:
+    st.caption("Einzelanalyse mit frei vorgegebener Eigenverbrauchsquote. Diese vereinfachte Sensitivität verwendet keine Heizungs-/Batteriesimulation und verändert die Hauptrechnung nicht.")
+    with st.expander("Annahmen nur für diese Einzelanalyse"):
+        for i in range(4):
+            st.session_state.setdefault(f"shade_{i}",st.session_state.shades[i])
+            number(f"Ertragsverlust {i+1} · %",f"shade_{i}",0.,100.,1.)
+        for i in range(3):
+            st.session_state.setdefault(f"share_{i}",st.session_state.shares[i])
+            number(f"Eigenverbrauchsquote {i+1} · %",f"share_{i}",0.,100.,1.)
+        number("Pauschaler Speicherverlust · %","storage_loss",0.,100.,1.)
+    shades = [st.session_state[f"shade_{i}"] for i in range(4)]
+    shares = [st.session_state[f"share_{i}"] for i in range(3)]
+    st.session_state.shades,st.session_state.shares = shades,shares
+    records = []
+    try:
+        for qshade in shades:
+            for share in shares:
+                result = calculate(a,qshade,share)
+                records.append({"Ertragsverlust %":qshade,"Eigenverbrauch %":share,"Amortisation":duration(result["payback"],a.years),"Kapitalwert €":result["npv"]})
+        st.dataframe(pd.DataFrame(records).round(1),hide_index=True,width="stretch")
+    except ValueError as exc:
+        st.error(f"Nur Einzelanalyse: {exc}")
+    st.caption("Rechnet mit dem Basisangebot inklusive 7-kWh-Speicher, ohne Klassen-Aufpreis/Minderpreis. Keine Aussage über die aktuell gewählte Anlagenkonfiguration.")
+with sources:
+    st.markdown("""**Eine Konfiguration, eine Hauptrechnung.** Investition, Amortisation, Kapitalwert, Jahreskurve und Export verwenden dieselbe Heizart, Speichergröße und Verschattung. Einzelanalysen variieren ausdrücklich benannte Annahmen.
 
-if a.tariff_basis == "2026-Referenz":
-    st.info("7,70 ct/kWh sind für Überschusseinspeisung bis 10 kWp bei Inbetriebnahme 01.08.–31.12.2026 belegt. Der einstellbare Satz ist für 2027 nicht zugesichert.")
-    if abs(a.feed_price - 7.7) > .00001:
-        st.warning("Der eingestellte Vergütungssatz weicht von der belegten 2026-Referenz ab.")
-else:
-    st.warning("Vergütung ist hier eine eigene Zukunftsannahme. Satz und Laufzeit vor einer Investitionsentscheidung aktualisieren.")
+    PVGIS-Wetterfolge 2023 mit 8.760 Stunden, normiert auf die Monatsmittel der bisherigen Ertragsabschätzung (7.060 kWh/Jahr als Startwert). Dach 5,58 kWp, 38° Südwest; Fassade 2,79 kWp, 90° Südost. Keine lokale Baum-/Gebäudeverschattung; der eingestellte Abschlag wirkt pauschal. Verbrauch und Effizienz sind Modellannahmen, keine Messung des Hauses.
 
-metrics = {"Einfache Amortisation": "simple", "Amortisation im Jahresmodell": "payback",
-           "Abgezinste Amortisation": "discounted_payback", "Kapitalwert": "npv", "Nettoüberschuss im ersten Jahr": "first_net"}
-metric = st.selectbox("Kennzahl im Variantenvergleich", list(metrics), index=1)
-st.caption({"Einfache Amortisation": "Investition geteilt durch den Nettoüberschuss des ersten Jahres. Spätere Alterung und Ersatzkosten bleiben in dieser Kennzahl unberücksichtigt.",
-    "Amortisation im Jahresmodell": "Zeitpunkt der Kostendeckung mit jährlichem Ertragsrückgang und gewählten Ersatzkosten. Die Investition wird nicht verzinst.",
-    "Abgezinste Amortisation": "Kostendeckung nach Berücksichtigung des Zeitwerts des Geldes: spätere Einsparungen zählen weniger als heutige.",
-    "Kapitalwert": "Summe aller abgezinsten Überschüsse abzüglich Anfangsinvestition. Positiv: mehr als die eingestellte Verzinsungsanforderung; negativ: diese wird nicht erreicht.",
-    "Nettoüberschuss im ersten Jahr": "Vermiedene Strombezugskosten plus Einspeiseerlöse minus laufende Kosten und gegebenenfalls Ersatzkosten in Jahr 1."}[metric])
-results, export_rows, matrix = {}, [], []
-for shade in shades:
-    line = {"Ertragsverlust": f"{shade:g} % · {a.generation * (1-shade/100):,.0f} kWh".replace(",", ".")}
-    for share in shares:
-        r = calculate(a, shade, share)
-        results[(shade, share)] = r
-        key = metrics[metric]
-        val = r["first"]["net"] if key == "first_net" else r[key]
-        line[f"{share:g} % Eigenverbrauch"] = money(val) if key in ("npv", "first_net") else duration(val, a.years)
-        export_rows.append(dict(Ertragsverlust_Prozent=shade, Eigenverbrauch_Prozent=share,
-            Ertrag_kWh=r["first"]["generation"], Netto_Jahr1_EUR=r["first"]["net"],
-            Einfache_Amortisation_Jahre=r["simple"], Amortisation_Modell_Jahre=r["payback"],
-            Amortisation_abgezinst_Jahre=r["discounted_payback"], Kapitalwert_EUR=r["npv"]))
-    matrix.append(line)
-st.dataframe(pd.DataFrame(matrix), hide_index=True, width="stretch")
-st.caption("Amortisation im Jahresmodell: ab diesem Zeitpunkt bleibt der kumulierte Saldo bis zum Ende des gewählten Zeitraums positiv. Jahresbruchteile sind linear interpoliert. Ersatzkosten können eine frühere Kostendeckung wieder aufheben.")
+    Keine Finanzierung, Heizungsinvestition, dynamische Netzladung oder Restwert. Batterie ohne Alterung/Standbyverbrauch, Stundenmittel ohne kurze Leistungsspitzen. 30,60 ct/kWh aus Mainova-Auszug, Preisgarantiedauer offen. Grundpreis wird nicht als Ersparnis gerechnet. 7,70 ct/kWh sind die belegte 2026-Referenz, keine Zusage für spätere Inbetriebnahme.
 
-col1, col2 = st.columns(2)
-shade = col1.selectbox("Detail · Ertragsverlust", shades, format_func=lambda v: f"{v:g} %")
-share = col2.selectbox("Detail · Eigenverbrauch", shares, index=1, format_func=lambda v: f"{v:g} %")
-r = results[(shade, share)]
-c1, c2, c3 = st.columns(3)
-c1.metric("Anfangsinvestition", money(a.investment))
-c2.metric("Nettoüberschuss · Jahr 1", money(r["first"]["net"]))
-c3.metric(f"Kapitalwert · {a.years} Jahre", money(r["npv"]))
-
-tab1, tab2, tab3, tab_heat, tab4 = st.tabs(["Zahlungsverlauf", "Solarstrom & Nutzen", "Strompreis-Sensitivität", "Heizung & Speicher", "Modell & Quellen"])
-with tab1:
-    discounted = st.radio("Darstellung", ["Nominal", "Abgezinst"], horizontal=True) == "Abgezinst"
-    balance_key = "discounted_balance" if discounted else "balance"
-    series = []
-    for s in shades:
-        for row in results[(s, share)]["rows"]:
-            series.append({"Jahr": row["year"], "Saldo (€)": row[balance_key], "Ertragsverlust": f"{s:g} %"})
-    data = pd.DataFrame(series)
-    chart = alt.Chart(data).mark_line(point=True).encode(
-        x=alt.X("Jahr:Q", axis=alt.Axis(tickMinStep=1)), y=alt.Y("Saldo (€):Q"),
-        color="Ertragsverlust:N", strokeDash="Ertragsverlust:N", tooltip=list(data.columns))
-    zero = alt.Chart(pd.DataFrame({"Null": [0]})).mark_rule(color="gray").encode(y="Null:Q")
-    st.altair_chart((chart + zero).properties(height=360), width="stretch")
-    st.caption(f"Alle vier Ertragsfälle bei {share:g} % Eigenverbrauch. Abzinsung: {a.discount:g} %. Ersatzkosten werden am Ende des eingestellten Jahres verbucht.")
-    st.caption(f"Die Null-Linie bedeutet: Die anfängliche PV-Investition ist zurückverdient. Der Knick in Jahr {a.replacement_year} entsteht bei aktiviertem Ersatzkostenszenario durch die angenommenen {money(a.replacement_cost)}. Das ist eine Annahme und kein vorhergesagter Defekt.")
-with tab2:
-    first = r["first"]
-    energy = pd.DataFrame([{"Jahr": "Jahr 1", "Verwendung": name, "kWh": first[key]} for name, key in
-                          [("Eigenverbrauch", "own"), ("Speicherverluste", "losses"), ("Einspeisung", "export")]])
-    st.altair_chart(alt.Chart(energy).mark_bar().encode(x="kWh:Q", y="Jahr:N", color="Verwendung:N",
-                     tooltip=["Verwendung", alt.Tooltip("kWh:Q", format=".0f")]).properties(height=150), width="stretch")
-    st.dataframe(pd.DataFrame({"Bestandteil · Jahr 1": ["PV-Erzeugung (kWh)", "Nutzbarer Eigenverbrauch (kWh)", "Speicherverluste (kWh)", "Einspeisung (kWh)", "Vermiedene Bezugskosten (€)", "Einspeiseerlöse (€)", "Betriebskosten (€)", "Ersatzkosten (€)", "Nettoüberschuss (€)"],
-        "Wert": [first[k] for k in ("generation", "own", "losses", "export", "avoided", "feed", "operating", "replacement", "net")]}).round(2), hide_index=True)
-    st.caption("Eigenverbrauch und Speicherverluste sind feste Jahresanteile als Sensitivität. Keine automatische Speicheroptimierung, keine Lastprofil- oder Autarkieprognose.")
-with tab3:
-    method = st.radio("Sensitivität · Kennzahl", ["Einfache Amortisation", "Amortisation im Jahresmodell"], horizontal=True)
-    price_rows = []
-    for price in range(20, 46):
-        other = Assumptions(**dict(asdict(a), power_price=float(price)))
-        for s in shades:
-            result = calculate(other, s, share)
-            price_rows.append({"Strompreis (ct/kWh)": price, "Amortisation (Jahre)": result["simple" if method == "Einfache Amortisation" else "payback"], "Ertragsverlust": f"{s:g} %"})
-    df = pd.DataFrame(price_rows)
-    st.altair_chart(alt.Chart(df).mark_line(point=True).encode(x="Strompreis (ct/kWh):Q", y="Amortisation (Jahre):Q", color="Ertragsverlust:N", strokeDash="Ertragsverlust:N", tooltip=list(df.columns)).properties(height=330), width="stretch")
-    st.caption("Fehlende Punkte: keine Amortisation innerhalb des Modellzeitraums bzw. kein positiver Jahresüberschuss. Preisänderung pro Jahr bleibt wie links eingestellt.")
-with tab4:
-    st.markdown("""**Berechnungsgrundlage**
-
-    - 8,37 kWp: Dach 5,58 kWp / 38° / Südwest; Fassade 2,79 kWp / 90° / Südost.
-    - PVGIS 5.3 / SARAH3, 2005–2023, ungefähr 50,90° N / 7,87° E. 14 % Systemverluste bereits im Ertrag enthalten. Zusätzliche Speicherverluste werden erst hier abgezogen.
-    - Ausgangswert 7.060 kWh gerundet aus 7.062 kWh; Gelände, Bäume und Gebäude noch nicht simuliert. Winkel sind dokumentierte Eingaben der Vorrechnung, keine Live-PVGIS-Steuerung.
-    - Im Quotenmodell: Eigenverbrauch = Erzeugung × Quote. Einspeisung = Erzeugung − Eigenverbrauch − Speicherverluste. Der Tab Heizung & Speicher rechnet stattdessen stündliche Lasten und Batterieflüsse.
-    - Jahresnutzen = vermiedene Bezugskosten + vergütete Einspeisung − Betriebskosten − Ersatzkosten.
-    - Kapitalwert = negative Anfangsinvestition + Summe der abgezinsten jährlichen Zahlungsüberschüsse.
-    - Vergütung für volle Modelljahre; nach Ablauf 0 €. Inbetriebnahme-Restjahr und eventuelle Verlängerung nicht modelliert. Abschlag auf Einspeiseerlöse ist eine Annahme; 60-%-Begrenzung und negative Preisstunden sind nicht stundengenau simuliert.
-    - Mainova: 30,60 ct/kWh brutto aus Nutzerauszug 27.10.2026. Preisgarantiedauer offen. Der Grundpreis 164,62 €/Jahr bleibt bestehen und wird nicht als PV-Ersparnis gezählt.
-    - Keine Finanzierung, Steuererstattung, dynamisches Netzladen oder Restwert. Ersatzkosten sind ein Szenario, keine Lebensdauerzusage. Alle Eurobeträge nominal; Strom-/Kostensteigerung und Diskontsatz konsistent wählen.
-
-    **Quellen (geprüft 08.11.2026)**
-
-    [Bundesnetzagentur · Fördersätze](https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/ErneuerbareEnergien/EEG_Foerderung/start.html) ·
-    [EU-PVGIS · Rechenparameter](https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en)
-
-    Lokal: Mainova_Vertragsstand_und_WP_Optionen_2026-10-27.md und Weiss-Angebot 2026-09-441-V2. Die veröffentlichte Vergütung betrifft Inbetriebnahme 01.08.–31.12.2026. Für spätere Inbetriebnahme Satz und Rechtslage neu prüfen.
+    [EU-PVGIS](https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en) · [Bundesnetzagentur](https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/ErneuerbareEnergien/EEG_Foerderung/start.html)
     """)
-
-with tab_heat:
-    draw_heating(a, shades, money, duration)
-
-with st.expander("Jahresrechnung · ausgewählte Kombination"):
-    annual = pd.DataFrame(r["rows"]).rename(columns={"year": "Jahr", "generation": "PV_kWh", "own": "Eigenverbrauch_kWh", "losses": "Speicherverlust_kWh", "export": "Einspeisung_kWh", "avoided": "Bezug_gespart_EUR", "feed": "Verguetung_EUR", "operating": "Betrieb_EUR", "replacement": "Ersatz_EUR", "net": "Netto_EUR", "discounted_net": "Netto_abgezinst_EUR", "balance": "Saldo_EUR", "discounted_balance": "Saldo_abgezinst_EUR"})
-    st.dataframe(annual.round(2), hide_index=True)
-settings = dict(asdict(a), shades=shades, shares=shares, **{k: st.session_state[k] for k in HEAT_DEFAULTS}, **{k: st.session_state[k] for k in STORAGE_DEFAULTS})
-left, middle, right = st.columns(3)
-left.download_button("Einstellungen · JSON", json.dumps({"schema": 3, "settings": settings}, ensure_ascii=False, indent=2), "pv-einstellungen.json", "application/json")
-middle.download_button("12 Varianten · CSV", pd.DataFrame(export_rows).to_csv(index=False, sep=";", decimal=","), "pv-varianten.csv", "text/csv")
-right.download_button("Jahresrechnung · CSV", annual.to_csv(index=False, sep=";", decimal=","), "pv-jahresrechnung.csv", "text/csv")
+settings = {k:st.session_state[k] for k in DEFAULTS}
+st.download_button("Gesamte Konfiguration speichern · JSON",json.dumps({"schema":4,"settings":settings},ensure_ascii=False,indent=2),"pv-einstellungen.json","application/json")

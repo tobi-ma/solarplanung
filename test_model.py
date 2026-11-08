@@ -50,7 +50,8 @@ class UITests(unittest.TestCase):
         app = AppTest.from_file(str(Path(__file__).with_name("app.py"))).run(timeout=30)
         self.assertEqual(len(app.exception), 0)
         self.assertIn("18.090", app.metric[0].value)
-        self.assertIn("Heizung & Speicher", [tab.label for tab in app.tabs])
+        self.assertEqual(app.tabs[0].label, "Meine Rechnung")
+        self.assertIn("Einzelanalyse · Speicher", [tab.label for tab in app.tabs])
         self.assertEqual(app.number_input(key="h_heat").value, 16000.)
         app.number_input(key="scaffold").set_value(0.).run()
         self.assertEqual(len(app.exception), 0)
@@ -62,7 +63,7 @@ class UITests(unittest.TestCase):
         from streamlit.testing.v1 import AppTest
         app = AppTest.from_file(str(Path(__file__).with_name("app.py"))).run(timeout=30)
         self.assertEqual(len(app.exception), 0)
-        app.checkbox(key="h_battery").uncheck()
+        app.selectbox(key="plant_storage").select(0)
         app.checkbox(key="h_central_cooling").check().run(timeout=30)
         self.assertEqual(len(app.exception), 0)
         self.assertFalse(app.session_state["h_battery"])
@@ -71,7 +72,7 @@ class UITests(unittest.TestCase):
     def test_storage_size_and_price_controls(self):
         from streamlit.testing.v1 import AppTest
         app = AppTest.from_file(str(Path(__file__).with_name("app.py"))).run(timeout=30)
-        app.selectbox(key="b_size").select(14).run(timeout=30)
+        app.selectbox(key="plant_storage").select(14).run(timeout=30)
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.number_input(key="h_capacity").value, 13.8)
         self.assertEqual(app.number_input(key="h_charge_power").value, 7.)
@@ -79,6 +80,24 @@ class UITests(unittest.TestCase):
         app.number_input(key="b_upgrade14").set_value(2000.).run(timeout=30)
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.session_state["b_discount"], 3000.)
+
+    def test_single_configuration_drives_metrics_and_year_table(self):
+        from streamlit.testing.v1 import AppTest
+        from heating_model import Heating, VARIANTS
+        from storage_model import Storage, storage_financial
+        app = AppTest.from_file(str(Path(__file__).with_name("app.py"))).run(timeout=30)
+        app.selectbox(key="plant_variant").select(VARIANTS[2])
+        app.selectbox(key="plant_storage").select(21)
+        app.number_input(key="plant_shade").set_value(30.)
+        app.number_input(key="b_upgrade21").set_value(2500.).run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        expected = storage_financial(Heating(capacity=20.7,charge_power=10.,discharge_power=10.),VARIANTS[2],Assumptions(),30.,Storage(size=21,upgrade21=2500.))
+        self.assertEqual(app.metric[0].value, "20.590 €")
+        self.assertEqual(app.metric[3].value, f"{expected['npv']:,.0f} €".replace(",","."))
+        self.assertAlmostEqual(app.dataframe[0].value.iloc[-1]["discounted_balance"],round(expected["npv"],2))
+        before = [x.value for x in app.metric[:4]]
+        app.number_input(key="share_0").set_value(35.).run(timeout=30)
+        self.assertEqual(before,[x.value for x in app.metric[:4]])
 
 
 if __name__ == "__main__":

@@ -23,17 +23,19 @@ def euro(value, signed=False):
     return (f"{value:+,.2f}" if signed else f"{value:,.2f}").replace(",", "_").replace(".", ",").replace("_", ".") + " €"
 
 
-def controls():
-    st.selectbox("Speicherklasse · Huawei LUNA-S1", list(SIZES), key="b_size", on_change=apply_size,
-                 format_func=lambda x: f"{x} kWh-Klasse · {SIZES[x][0]:g} kWh nutzbar")
+def controls(show_size=True, show_prices=True):
+    if show_size:
+        st.selectbox("Speicherklasse · Huawei LUNA-S1", list(SIZES), key="b_size", on_change=apply_size,
+                     format_func=lambda x: f"{x} kWh-Klasse · {SIZES[x][0]:g} kWh nutzbar")
     st.caption("7/14/21-kWh-Klassen entsprechen 6,9/13,8/20,7 kWh nutzbar. Beim Klassenwechsel werden Leistungsvorgaben auf 3,5/7/10 kW gesetzt; sie bleiben unten anpassbar. 21er-Batterie: bis 10,5 kW laut Datenblatt, hier auf 10 kW als Systemannahme begrenzt; die konkrete Wechselrichterfreigabe muss Ron bestätigen.")
-    st.markdown("**Angebotspreise für den direkten Vergleich**")
-    st.number_input("Tatsächlicher Minderpreis ohne Speicher gegenüber 7-kWh-Angebot · €", 0., 1000000., step=100., key="b_discount")
-    st.caption("Startwert 3.650 € = bisherige Speicherposition, noch kein bestätigter Minderpreis. Hier den vollständigen Preisunterschied einschließlich entfallender Montage/Zubehör eintragen.")
-    c1, c2 = st.columns(2)
-    c1.number_input("Aufpreis 14-kWh-Klasse gegenüber 7-kWh-Angebot · €", 0., 1000000., step=100., key="b_upgrade14")
-    c2.number_input("Aufpreis 21-kWh-Klasse gegenüber 7-kWh-Angebot · €", 0., 1000000., step=100., key="b_upgrade21")
-    st.caption("Aufpreise sind vollständige Preisunterschiede, keine Preise je zusätzlichem Modul. 0 € bedeutet eine unbestätigte Annahme, kein kostenloses Angebot.")
+    if show_prices:
+        st.markdown("**Angebotspreise für den direkten Vergleich**")
+        st.number_input("Tatsächlicher Minderpreis ohne Speicher gegenüber 7-kWh-Angebot · €", 0., 1000000., step=100., key="b_discount")
+        st.caption("Startwert 3.650 € = bisherige Speicherposition, noch kein bestätigter Minderpreis. Hier den vollständigen Preisunterschied einschließlich entfallender Montage/Zubehör eintragen.")
+        c1, c2 = st.columns(2)
+        c1.number_input("Aufpreis 14-kWh-Klasse gegenüber 7-kWh-Angebot · €", 0., 1000000., step=100., key="b_upgrade14")
+        c2.number_input("Aufpreis 21-kWh-Klasse gegenüber 7-kWh-Angebot · €", 0., 1000000., step=100., key="b_upgrade21")
+        st.caption("Aufpreise sind vollständige Preisunterschiede, keine Preise je zusätzlichem Modul. 0 € bedeutet eine unbestätigte Annahme, kein kostenloses Angebot.")
     c1, c2, c3 = st.columns(3)
     c1.number_input("Zusätzliche Batteriekosten · €/Jahr", 0., 1000000., step=10., key="b_annual_extra")
     c2.number_input("Zusätzliche Batterie-Ersatzkosten · €", 0., 1000000., step=100., key="b_replacement_extra")

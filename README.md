@@ -32,7 +32,11 @@ git push -u origin main
 
 ## Bedienung des Boards
 
-Links Annahmen ändern. Rechts zwölf Varianten vergleichen, Detailfall wählen, nominale/abgezinste Salden, Stromverwendung und Strompreis-Sensitivität ansehen. JSON-Download speichert Einstellungen; JSON-Upload lädt sie. CSV-Dateien exportieren die Varianten und die gewählte Jahresrechnung. Einstellungen sind ohne Export nur während der laufenden Sitzung verfügbar.
+Auf der Startseite Heizart, Speichergröße (ohne / 7 / 14 / 21 kWh), Verschattung und Angebotspreise einstellen. Direkt darunter stehen Gesamtinvestition, jährlicher PV-Nettonutzen, Amortisation und Kapitalwert derselben Anlagenkonfiguration. ›Meine Rechnung‹ zeigt genau deren Jahreskurve und CSV-Jahresrechnung. Links stehen Tarife, Betrachtungszeitraum und weitere Finanzannahmen. Verbrauch, Wirkungsgrade und Batterieleistung liegen im aufklappbaren Bereich ›Weitere Annahmen‹ auf der Startseite.
+
+Zusätzliche Tabs heißen ausdrücklich ›Einzelanalyse · Speicher‹, ›Einzelanalyse · Heizarten‹ und ›Einzelanalyse · feste Quote‹. Sie untersuchen Alternativen zur Hauptkonfiguration. Änderungen an frei vorgegebenen Quoten beeinflussen die Hauptrechnung nicht. Alle Hauptkennzahlen verwenden dagegen die stündliche Heizungs-/Speicherrechnung und ihren tatsächlichen Angebotspreis.
+
+JSON-Download speichert die gesamte Konfiguration (Schema 4), einschließlich der gewählten Heizart, Speichergröße und Verschattung; ältere Exporte bleiben lesbar. Bei alten Dateien fehlen Heizart und Verschattung der Hauptauswahl: Nach Import prüfen, entsprechender Hinweis erscheint. Die Jahresrechnung und ihr Export sind dieselben Daten wie in der Hauptanzeige. Einstellungen sind ohne Export nur während der laufenden Sitzung verfügbar.
 
 Belegt: Weiss-V2 16.090 € ohne Gerüst; Mainova-Nutzerauszug 30,60 ct/kWh brutto (Preisgarantiedauer offen). Grundpreis 164,62 €/Jahr wird nicht als PV-Ersparnis gerechnet. 2.000 € Gerüst, 150 €/Jahr Betrieb und 4.000 € Ersatz in Jahr 13 sind angenommene Werte.
 
@@ -95,3 +99,7 @@ Neue Dateien: `storage_model.py`, `storage_ui.py`, `test_storage.py`, `.python-v
 ### Vereinfachte Ergebnisansicht
 
 Der Direktvergleich zeigt die wichtigsten Werte in einer kompakten Tabelle: Investition, Nettonutzen im ersten Jahr, modellierte Gesamt-Amortisation und Kapitalwert. Eine dritte Zeile **Differenz: mit minus ohne** macht Mehrpreis, jährlichen Vorteil und Kapitalwert-Vorteil unmittelbar nachvollziehbar. Die Kapitalwert-Subtraktion steht zusätzlich ausgeschrieben unter der Tabelle. **Amortisation · Speicher allein** wird separat aus den zusätzlichen Zahlungsüberschüssen berechnet; sie ist keine Differenz der Amortisationsdauern beider Gesamtanlagen. Strommengen und ausführliche Rechenwege sind aufklappbar. CSV enthält ebenfalls die drei Zeilen; für die Differenzzeile bleibt die Gesamt-Amortisation leer.
+
+### Konfigurator als Startseite
+
+Es gibt seit dieser Fortschreibung eine maßgebliche Hauptrechnung. Die früher auf der Startseite stehende 12er-Quotentabelle ist jetzt eine ausdrücklich vereinfachte Einzelanalyse. Deren Fehler oder unwirksame Quoten blockieren die Hauptrechnung nicht. Die Hauptkonfiguration steuert dieselben `Assumptions`-, `Heating`- und `Storage`-Parameter für Kennzahlen, Kurve, Jahresdaten und Export. Der Haupt-Kapitalwert entspricht damit immer dem letzten abgezinsten Saldo der exportierten Jahresrechnung. Die Heizungsanalyse verwendet dieselbe Auswahl für ihre Detailgrafiken und verändert nur in der gekennzeichneten Vergleichstabelle Heizarten und Verluststufen.
