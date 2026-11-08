@@ -1,7 +1,7 @@
 from dataclasses import replace
 import unittest
 from heating_model import Heating, VARIANTS
-from storage_model import Storage, SIZES, compare_storage, validate_storage
+from storage_model import Storage, SIZES, compare_storage, validate_storage, comparison_rows
 from model import Assumptions
 
 
@@ -31,6 +31,16 @@ class StorageTests(unittest.TestCase):
         self.assertEqual([SIZES[k][0] for k in (7,14,21)], [6.9,13.8,20.7])
         with self.assertRaises(ValueError):
             validate_storage(Storage(discount=20000.), Assumptions())
+
+    def test_difference_row_reconciles(self):
+        comp = compare_storage(Heating(capacity=20.7, charge_power=10., discharge_power=10.),
+                               VARIANTS[0], Assumptions(), 30., Storage(size=21))
+        rows = comparison_rows(comp)
+        self.assertEqual(len(rows), 3)
+        for key in ("investment", "annual_net", "npv"):
+            self.assertAlmostEqual(rows[2][key], rows[0][key]-rows[1][key])
+        self.assertIsNone(rows[2]["payback"])
+        self.assertAlmostEqual(rows[2]["npv"], 1448.5, delta=1.)
 
 
 if __name__ == "__main__":

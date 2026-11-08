@@ -3,7 +3,7 @@ from dataclasses import asdict
 import altair as alt
 import pandas as pd
 import streamlit as st
-from storage_model import Storage, SIZES, compare_storage
+from storage_model import Storage, SIZES, compare_storage, comparison_rows
 
 STORAGE_DEFAULTS = {f"b_{k}": v for k, v in asdict(Storage()).items()}
 
@@ -17,6 +17,10 @@ def apply_size():
     st.session_state.h_capacity = capacity
     st.session_state.h_charge_power = power
     st.session_state.h_discharge_power = power
+
+
+def euro(value, signed=False):
+    return (f"{value:+,.2f}" if signed else f"{value:,.2f}").replace(",", "_").replace(".", ",").replace("_", ".") + " €"
 
 
 def controls():
@@ -52,14 +56,24 @@ def draw(h, variant, a, shade, s, money, duration):
             "Netzbezug kWh": t["grid"], "Einspeisung kWh": t["export"],
             "PV-Nutzen Jahr 1 €": fin["rows"][1]["net"],
             "PV-Amortisation": duration(fin["payback"], a.years), "PV-Kapitalwert €": fin["npv"]})
-    st.dataframe(pd.DataFrame(table).round(1), hide_index=True, width="stretch")
-    st.caption("Investition mit Speicher = ursprüngliches Angebot plus Gerüst/Zusatzkosten minus Zuschuss plus Klassen-Aufpreis. Ohne Speicher wird vom ursprünglichen 7-kWh-Angebot der Minderpreis abgezogen. PV-Amortisation bewertet jeweils die ganze PV-Anlage.")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Mehrinvestition nur Speicher", money(comp["extra_investment"]))
-    c2.metric("Zusatznutzen Speicher · Jahr 1", money(comp["first_benefit"]))
-    c3.metric(f"Speicher-Kapitalwert · {a.years} Jahre", money(comp["npv"]))
-    st.markdown(f"**Speicher allein:** einfache Amortisation {duration(comp['simple'], a.years)}; Amortisation im Jahresmodell {duration(comp['payback'], a.years)}.")
-    st.caption("Der Zusatznutzen ist die Differenz der jährlichen Nettoüberschüsse: weniger Netzbezug, aber auch weniger Einspeiseerlöse, Ladeverluste und zusätzliche Batteriekosten. Ein positiver Speicher-Kapitalwert bedeutet: Der zusätzliche Nutzen deckt Mehrpreis und gewählte Zusatzkosten einschließlich der eingestellten Abzinsung.")
+    core_rows = comparison_rows(comp)
+    visible = []
+    for i, row in enumerate(core_rows):
+        visible.append({"Ausführung": row["label"], "Investition": euro(row["investment"], i == 2),
+            "Nettonutzen · Jahr 1": euro(row["annual_net"], i == 2),
+            "Amortisation · Gesamtanlage": duration(row["payback"], a.years) if i < 2 else "siehe Speicher allein ↓",
+            f"Kapitalwert · {a.years} Jahre": euro(row["npv"], i == 2)})
+    st.table(pd.DataFrame(visible).set_index("Ausführung"))
+    st.caption(f"Amortisation: Wann die Investition einschließlich der eingestellten laufenden und Ersatzkosten zurückverdient ist, ohne Abzinsung. Kapitalwert: Ergebnis nach {a.years} Jahren mit {a.discount:g} % Abzinsung. Positiv = Verzinsungsziel erreicht, negativ = nicht erreicht.")
+    st.markdown(f"**Kapitalwert-Vorteil durch Speicher gegenüber ohne Speicher:** {euro(comp['with_fin']['npv'])} − ({euro(comp['without_fin']['npv'])}) ≈ **{euro(comp['npv'], True)}**.")
+    st.caption(f"Die Differenzzeile rechnet immer ›mit minus ohne‹. Bei der Investition ist sie der Mehrpreis; beim Nettonutzen und Kapitalwert der wirtschaftliche Vorteil. Ein positiver Speichervorteil allein bedeutet nicht, dass die Gesamtanlage ihr Verzinsungsziel erreicht.")
+    c1, c2 = st.columns(2)
+    c1.metric("Amortisation · Speicher allein", duration(comp["payback"], a.years))
+    c2.metric("Kapitalwert-Vorteil durch Speicher", euro(comp["npv"], True))
+    st.caption(f"Speicher allein: Wann zusätzliche Einsparungen den Mehrpreis und zusätzliche Batteriekosten decken. Das ist keine Subtraktion der beiden Gesamt-Amortisationsdauern. Die einfache Rechnung Mehrpreis ÷ Zusatznutzen im ersten Jahr ergibt {duration(comp['simple'], a.years)}; die Anzeige oben verwendet das Jahresmodell.")
+    with st.expander("Strommengen und vollständiger Rechenweg"):
+        st.dataframe(pd.DataFrame(table).round(1), hide_index=True, width="stretch")
+        st.caption("Investition mit Speicher = ursprüngliches Angebot plus Gerüst/Zusatzkosten minus Zuschuss plus Klassen-Aufpreis. Ohne Speicher wird vom ursprünglichen 7-kWh-Angebot der Minderpreis abgezogen. Zusatznutzen = weniger Netzbezug minus entgangene Einspeiseerlöse und zusätzliche Batteriekosten; Ladeverluste sind enthalten.")
     data = pd.DataFrame([{"Jahr": row["year"], "Saldo €": row[key], "Darstellung": title}
                          for row in comp["delta"] for key, title in
                          [("balance", "Nominal"), ("discounted_balance", "Abgezinst")]])
@@ -68,5 +82,6 @@ def draw(h, variant, a, shade, s, money, duration):
     zero = alt.Chart(pd.DataFrame({"Saldo €": [0]})).mark_rule(color="gray").encode(y="Saldo €:Q")
     st.altair_chart((chart+zero).properties(height=260), width="stretch")
     st.caption("Die Linien zeigen ausschließlich den Mehrwert der Batterie gegenüber derselben PV-Anlage ohne Speicher. Start unter null = Mehrpreis. Über null = zurückverdient; ein späterer Knick entsteht durch eingetragene Batterie-Ersatzkosten. Die gemeinsame PV-Reserve fällt aus dieser Differenz heraus.")
-    st.download_button("Speichervergleich · CSV", pd.DataFrame(table).to_csv(index=False, sep=";", decimal=","), "pv-speichervergleich.csv", "text/csv")
+    export = pd.DataFrame(core_rows).rename(columns={"label": "Ausfuehrung", "investment": "Investition_EUR", "annual_net": "Nettonutzen_Jahr1_EUR", "payback": "Amortisation_Gesamtanlage_Jahre", "npv": "Kapitalwert_EUR"})
+    st.download_button("Speichervergleich · CSV", export.to_csv(index=False, sep=";", decimal=","), "pv-speichervergleich.csv", "text/csv")
     return comp

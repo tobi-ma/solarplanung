@@ -7,6 +7,18 @@ from model import sustained_payback
 SIZES = {7: (6.9, 3.5), 14: (13.8, 7.), 21: (20.7, 10.)}
 
 
+def comparison_rows(comp):
+    """Comparable totals plus an explicit difference, never subtract payback times."""
+    rows = []
+    for title, prefix in (("Gesamtanlage mit Speicher", "with"), ("Gesamtanlage ohne Speicher", "without")):
+        fin = comp[f"{prefix}_fin"]
+        rows.append(dict(label=title, investment=comp[f"{prefix}_investment"],
+                         annual_net=fin["rows"][1]["net"], payback=fin["payback"], npv=fin["npv"]))
+    rows.append(dict(label="Differenz: mit minus ohne", investment=comp["extra_investment"],
+                     annual_net=comp["first_benefit"], payback=None, npv=comp["npv"]))
+    return rows
+
+
 @dataclass(frozen=True)
 class Storage:
     size: int = 7

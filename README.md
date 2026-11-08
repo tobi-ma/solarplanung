@@ -91,3 +91,7 @@ Im Heizungs-Tab wird für die ausgewählte Heizvariante und Verschattung immer d
 - Einstellungen exportieren als Schema 3. Alte Schema-1/2-Dateien bleiben lesbar; freie alte Kapazitäten werden auf die nächstliegende 7/14/21-Klasse übertragen und im Importhinweis kenntlich gemacht.
 
 Neue Dateien: `storage_model.py`, `storage_ui.py`, `test_storage.py`, `.python-version`. Tests prüfen auch Preisunterschiede, gemeinsame versus zusätzliche Ersatzkosten und Einstellungen der Speicherklassen.
+
+### Vereinfachte Ergebnisansicht
+
+Der Direktvergleich zeigt die wichtigsten Werte in einer kompakten Tabelle: Investition, Nettonutzen im ersten Jahr, modellierte Gesamt-Amortisation und Kapitalwert. Eine dritte Zeile **Differenz: mit minus ohne** macht Mehrpreis, jährlichen Vorteil und Kapitalwert-Vorteil unmittelbar nachvollziehbar. Die Kapitalwert-Subtraktion steht zusätzlich ausgeschrieben unter der Tabelle. **Amortisation · Speicher allein** wird separat aus den zusätzlichen Zahlungsüberschüssen berechnet; sie ist keine Differenz der Amortisationsdauern beider Gesamtanlagen. Strommengen und ausführliche Rechenwege sind aufklappbar. CSV enthält ebenfalls die drei Zeilen; für die Differenzzeile bleibt die Gesamt-Amortisation leer.
