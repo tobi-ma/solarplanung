@@ -53,3 +53,27 @@ Einfache Amortisation = Investition / Nettoüberschuss Jahr 1, ohne spätere Ver
 - `Start_PV_Board.command`: lokaler Starter.
 
 Tests: `python -m unittest discover -s . -p 'test_*.py'` aus diesem Ordner (Streamlit-Umgebung).
+
+## Heizungs- und Speichervergleich · Erweiterung 08.11.2026
+
+Im Tab **Heizung & Speicher** werden drei Varianten bei allen vier Ertragsfällen verglichen: Splits plus kleine Wasser-WP, zentrale Luft-Wasser-WP sowie zentrale WP mit einzelnen Splits. Gleichbleibender Nutzwärmebedarf, aufgeteilt auf die Heizgeräte. Die Zentral-WP kühlt nur bei aktivierter entsprechender Option; sonst wird der Komfortunterschied angezeigt. Die Investitionsrechnung betrifft weiterhin ausschließlich PV einschließlich Batterie, nicht die noch unbekannten Heizungsinvestitionen.
+
+Neue Startannahmen: Haushaltsstrom 3.500 kWh/Jahr, Raumwärme 16.000 kWh Wärme/Jahr, Warmwasser 2.500 kWh Wärme/Jahr, Kühlung 1.000 kWh Kälte/Jahr. JAZ Splits 3,5, Wasser-Raumheizung 3,2, Warmwasser 2,5; SEER Kühlung 4. Wärmeanteile FBH im Split-Konzept 25 %, Splits im Zentral-plus-Split-Konzept 20 %. Sämtliche Werte sind unbestätigte, veränderbare Szenarien. Gemeinsamer Stromzähler und Bezugspreis für alle Geräte angenommen.
+
+Raumheizstrom wird anhand von Temperaturstunden unter 15 °C verteilt (Gewicht 18 °C minus Außentemperatur, mit zusätzlichem Kältefaktor), anschließend auf Nutzwärme/JAZ normiert. Kühlung verteilt sich auf warme Stunden über 22 °C zwischen 10 und 22 Uhr und wird auf Kältebedarf/SEER normiert. Haushaltsstrom folgt einfachen auswählbaren Tagesmustern; Warmwasserladung auf vier Mittags- oder Morgen-/Abendstunden. Keine Gebäudesimulation, keine Heizlastbestimmung, keine Messprofile und keine Vorhersage einer konkreten JAZ.
+
+Batterie: anfangs leer, 6,9 kWh nutzbar, je 3,5 kW Lade-/Entladeleistung, 90 % Rundlaufwirkungsgrad als Annahme. Wirkungsgrad wird symmetrisch auf Laden/Entladen aufgeteilt. Direktverbrauch vor Laden, Entladung nur zur Lastdeckung, keine Netzladung. Die Energie am Jahresende bleibt gespeichert und wird nicht als Einspeisung oder Eigenverbrauch gezählt. Energieerhaltung: PV = Direktverbrauch + Batterieabgabe + Verluste + Einspeisung + Endinhalt. Keine Batteriealterung, Standbylast oder unterstündlichen Spitzen. Batterie ausschalten vermindert nicht automatisch den Angebotspreis.
+
+Im Heizungs-Langzeitmodell wird für jedes Jahr der degradierte PV-Ertrag erneut mit dem unveränderten Lastprofil und der Batterie simuliert. Kapazität und Leistung bleiben dabei konstant; Ersatzkosten sind weiterhin frei wählbare Zahlungsannahmen. Investition/Jahresnutzen/Kapitalwert betreffen PV gegenüber derselben Heizung ohne PV. Der Stromsaldo ist Netzbezug minus Einspeiseerlöse, ohne konstanten Grundpreis und ohne Heizungswartung. Einstellungen JSON Schema 2 enthalten beide Rechner; alte Schema-1-Dateien laden mit Startannahmen für den neuen Tab.
+
+### Wetterdaten und Reproduzierbarkeit
+
+`weather_2023.csv`: 8.760 stündliche Datensätze aus zwei öffentlichen PVGIS-5.3-Abfragen (abgerufen 08.11.2026). Zeitstempel UTC, PV-Mengen pro Stunde in kWh, Außentemperatur °C. Die Oberfläche nutzt Europe/Berlin einschließlich Sommerzeit. Wetterabfolge 2023; Monatsmengen beider Flächen werden jeweils auf die langjährigen Monatsmittel der Vorrechnung normiert. Anschließend Skalierung auf den gewählten Jahresertrag, standardmäßig 7.060 kWh. Das ergibt ein hybrides Planungsprofil, kein tatsächlich so beobachtetes Wetterjahr mit genau diesem Ertrag. Das Monatsprofil ist kein Ersatz für lokale Verschattungsnachweise.
+
+API-Basis: `https://re.jrc.ec.europa.eu/api/v5_3/seriescalc`. Gemeinsame Parameter: `lat=50.90&lon=7.87&startyear=2023&endyear=2023&pvcalculation=1&loss=14&usehorizon=0&pvtechchoice=crystSi&mountingplace=free&raddatabase=PVGIS-SARAH3&outputformat=json`. Dach zusätzlich `peakpower=5.58&angle=38&aspect=45`, Fassade `peakpower=2.79&angle=90&aspect=-45`.
+
+Nach Download beider JSON-Antworten kann `python prepare_weather.py ROOF.json WALL.json` die CSV reproduzieren. Im normalen App-Betrieb sind keine API-Zugriffe nötig. PVGIS-Systemverluste sind bereits im Ertrag enthalten; der pauschale Speicherverlust des alten Quotenmodells wird im Stundenmodell nicht zusätzlich angesetzt. Der Verschattungsabschlag wirkt pauschal und gleichmäßig auf alle Stunden.
+
+[EU-PVGIS: Stundendaten und Einheiten](https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/pvgis-5-tools/hourly-radiation_en) · [API-Dokumentation](https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en).
+
+Zusätzliche Dateien: `heating_model.py` (Simulation), `heating_ui.py` (Oberfläche und Erklärungen), `test_heating.py` (Energiebilanz und Rechenprüfung), `prepare_weather.py` (Datenaufbereitung), `weather_2023.csv` (öffentliche Wetterdaten, keine Haus-Messdaten).

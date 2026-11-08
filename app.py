@@ -8,9 +8,11 @@ import pandas as pd
 import streamlit as st
 
 from model import Assumptions, calculate, validate
+from heating_ui import HEAT_DEFAULTS, draw as draw_heating
+from heating_model import Heating, validate_heating
 
 st.set_page_config(page_title="PV · Dach & Fassade", page_icon="☀️", layout="wide")
-DEFAULTS = dict(asdict(Assumptions()), shades=[0., 10., 20., 30.], shares=[40., 55., 70.])
+DEFAULTS = dict(asdict(Assumptions()), shades=[0., 10., 20., 30.], shares=[40., 55., 70.], **HEAT_DEFAULTS)
 for key, value in DEFAULTS.items():
     st.session_state.setdefault(key, value)
 
@@ -26,12 +28,24 @@ def duration(value, years):
 def load_settings():
     try:
         data = json.loads(st.session_state.settings_upload.getvalue())
-        if data.get("schema") != 1:
+        schema = data.get("schema")
+        if schema not in (1, 2):
             raise ValueError("Unbekanntes Einstellungsformat.")
         data = data["settings"]
+        if schema == 1:
+            data = dict(HEAT_DEFAULTS, **data)
         if set(data) != set(DEFAULTS):
             raise ValueError("Unvollständige oder unbekannte Felder.")
         a = Assumptions(**{k: data[k] for k in asdict(Assumptions())})
+        validate_heating(Heating(**{k: data[f"h_{k}"] for k in asdict(Heating())}))
+        for k in ("household", "heat", "hot_water", "cooling"):
+            if not 0 <= data[f"h_{k}"] <= (100000 if k in ("household", "heat") else 50000):
+                raise ValueError("Wärme-/Verbrauchswert außerhalb des Eingabebereichs.")
+        for k in ("split_jaz", "water_jaz", "dhw_jaz", "seer"):
+            if not 1 <= data[f"h_{k}"] <= 10:
+                raise ValueError("JAZ/SEER außerhalb des Eingabebereichs.")
+        if data["h_capacity"] > 100 or max(data["h_charge_power"], data["h_discharge_power"]) > 50 or data["h_round_trip"] < 1:
+            raise ValueError("Speicherwert außerhalb des Eingabebereichs.")
         if len(data["shades"]) != 4 or len(data["shares"]) != 3:
             raise ValueError("Vier Verluststufen und drei Eigenverbrauchsquoten erforderlich.")
         for shade in data["shades"]:
@@ -84,6 +98,7 @@ with st.sidebar:
             number(f"Eigenverbrauchsquote {i + 1} · %", f"share_{i}", 0., 100., 1.)
         number("Zusätzliche Speicherverluste · % der PV-Erzeugung", "storage_loss", 0., 100., 1.)
         st.caption("Eigenverbrauch = Strom, der tatsächlich im Haushalt ankommt. Rest nach Eigenverbrauch und Speicherverlusten = Einspeisung.")
+        st.caption("Die drei Quoten und der pauschale Speicherverlust steuern nur den bisherigen Variantenvergleich. Im Tab ›Heizung & Speicher‹ entstehen diese Werte aus der Stundenrechnung.")
     with st.expander("Bezug & Einspeisung", expanded=True):
         number("Arbeitspreis brutto · ct/kWh · dokumentiert", "power_price", 0., 200., .1)
         number("Strompreisänderung · %/Jahr", "power_growth", -20., 20., .5)
@@ -132,6 +147,11 @@ else:
 metrics = {"Einfache Amortisation": "simple", "Amortisation im Jahresmodell": "payback",
            "Abgezinste Amortisation": "discounted_payback", "Kapitalwert": "npv", "Nettoüberschuss im ersten Jahr": "first_net"}
 metric = st.selectbox("Kennzahl im Variantenvergleich", list(metrics), index=1)
+st.caption({"Einfache Amortisation": "Investition geteilt durch den Nettoüberschuss des ersten Jahres. Spätere Alterung und Ersatzkosten bleiben in dieser Kennzahl unberücksichtigt.",
+    "Amortisation im Jahresmodell": "Zeitpunkt der Kostendeckung mit jährlichem Ertragsrückgang und gewählten Ersatzkosten. Die Investition wird nicht verzinst.",
+    "Abgezinste Amortisation": "Kostendeckung nach Berücksichtigung des Zeitwerts des Geldes: spätere Einsparungen zählen weniger als heutige.",
+    "Kapitalwert": "Summe aller abgezinsten Überschüsse abzüglich Anfangsinvestition. Positiv: mehr als die eingestellte Verzinsungsanforderung; negativ: diese wird nicht erreicht.",
+    "Nettoüberschuss im ersten Jahr": "Vermiedene Strombezugskosten plus Einspeiseerlöse minus laufende Kosten und gegebenenfalls Ersatzkosten in Jahr 1."}[metric])
 results, export_rows, matrix = {}, [], []
 for shade in shades:
     line = {"Ertragsverlust": f"{shade:g} % · {a.generation * (1-shade/100):,.0f} kWh".replace(",", ".")}
@@ -158,7 +178,7 @@ c1.metric("Anfangsinvestition", money(a.investment))
 c2.metric("Nettoüberschuss · Jahr 1", money(r["first"]["net"]))
 c3.metric(f"Kapitalwert · {a.years} Jahre", money(r["npv"]))
 
-tab1, tab2, tab3, tab4 = st.tabs(["Zahlungsverlauf", "Solarstrom & Nutzen", "Strompreis-Sensitivität", "Modell & Quellen"])
+tab1, tab2, tab3, tab_heat, tab4 = st.tabs(["Zahlungsverlauf", "Solarstrom & Nutzen", "Strompreis-Sensitivität", "Heizung & Speicher", "Modell & Quellen"])
 with tab1:
     discounted = st.radio("Darstellung", ["Nominal", "Abgezinst"], horizontal=True) == "Abgezinst"
     balance_key = "discounted_balance" if discounted else "balance"
@@ -173,6 +193,7 @@ with tab1:
     zero = alt.Chart(pd.DataFrame({"Null": [0]})).mark_rule(color="gray").encode(y="Null:Q")
     st.altair_chart((chart + zero).properties(height=360), width="stretch")
     st.caption(f"Alle vier Ertragsfälle bei {share:g} % Eigenverbrauch. Abzinsung: {a.discount:g} %. Ersatzkosten werden am Ende des eingestellten Jahres verbucht.")
+    st.caption(f"Die Null-Linie bedeutet: Die anfängliche PV-Investition ist zurückverdient. Der Knick in Jahr {a.replacement_year} entsteht bei aktiviertem Ersatzkostenszenario durch die angenommenen {money(a.replacement_cost)}. Das ist eine Annahme und kein vorhergesagter Defekt.")
 with tab2:
     first = r["first"]
     energy = pd.DataFrame([{"Jahr": "Jahr 1", "Verwendung": name, "kWh": first[key]} for name, key in
@@ -199,7 +220,7 @@ with tab4:
     - 8,37 kWp: Dach 5,58 kWp / 38° / Südwest; Fassade 2,79 kWp / 90° / Südost.
     - PVGIS 5.3 / SARAH3, 2005–2023, ungefähr 50,90° N / 7,87° E. 14 % Systemverluste bereits im Ertrag enthalten. Zusätzliche Speicherverluste werden erst hier abgezogen.
     - Ausgangswert 7.060 kWh gerundet aus 7.062 kWh; Gelände, Bäume und Gebäude noch nicht simuliert. Winkel sind dokumentierte Eingaben der Vorrechnung, keine Live-PVGIS-Steuerung.
-    - Eigenverbrauch = Erzeugung × Quote. Einspeisung = Erzeugung − Eigenverbrauch − Speicherverluste.
+    - Im Quotenmodell: Eigenverbrauch = Erzeugung × Quote. Einspeisung = Erzeugung − Eigenverbrauch − Speicherverluste. Der Tab Heizung & Speicher rechnet stattdessen stündliche Lasten und Batterieflüsse.
     - Jahresnutzen = vermiedene Bezugskosten + vergütete Einspeisung − Betriebskosten − Ersatzkosten.
     - Kapitalwert = negative Anfangsinvestition + Summe der abgezinsten jährlichen Zahlungsüberschüsse.
     - Vergütung für volle Modelljahre; nach Ablauf 0 €. Inbetriebnahme-Restjahr und eventuelle Verlängerung nicht modelliert. Abschlag auf Einspeiseerlöse ist eine Annahme; 60-%-Begrenzung und negative Preisstunden sind nicht stundengenau simuliert.
@@ -214,11 +235,14 @@ with tab4:
     Lokal: Mainova_Vertragsstand_und_WP_Optionen_2026-10-27.md und Weiss-Angebot 2026-09-441-V2. Die veröffentlichte Vergütung betrifft Inbetriebnahme 01.08.–31.12.2026. Für spätere Inbetriebnahme Satz und Rechtslage neu prüfen.
     """)
 
+with tab_heat:
+    draw_heating(a, shades, money, duration)
+
 with st.expander("Jahresrechnung · ausgewählte Kombination"):
     annual = pd.DataFrame(r["rows"]).rename(columns={"year": "Jahr", "generation": "PV_kWh", "own": "Eigenverbrauch_kWh", "losses": "Speicherverlust_kWh", "export": "Einspeisung_kWh", "avoided": "Bezug_gespart_EUR", "feed": "Verguetung_EUR", "operating": "Betrieb_EUR", "replacement": "Ersatz_EUR", "net": "Netto_EUR", "discounted_net": "Netto_abgezinst_EUR", "balance": "Saldo_EUR", "discounted_balance": "Saldo_abgezinst_EUR"})
     st.dataframe(annual.round(2), hide_index=True)
-settings = dict(asdict(a), shades=shades, shares=shares)
+settings = dict(asdict(a), shades=shades, shares=shares, **{k: st.session_state[k] for k in HEAT_DEFAULTS})
 left, middle, right = st.columns(3)
-left.download_button("Einstellungen · JSON", json.dumps({"schema": 1, "settings": settings}, ensure_ascii=False, indent=2), "pv-einstellungen.json", "application/json")
+left.download_button("Einstellungen · JSON", json.dumps({"schema": 2, "settings": settings}, ensure_ascii=False, indent=2), "pv-einstellungen.json", "application/json")
 middle.download_button("12 Varianten · CSV", pd.DataFrame(export_rows).to_csv(index=False, sep=";", decimal=","), "pv-varianten.csv", "text/csv")
 right.download_button("Jahresrechnung · CSV", annual.to_csv(index=False, sep=";", decimal=","), "pv-jahresrechnung.csv", "text/csv")

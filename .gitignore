@@ -12,3 +12,5 @@ venv/
 pv-einstellungen*.json
 pv-varianten*.csv
 pv-jahresrechnung*.csv
+pv-heizvergleich*.csv
+pv-stundenbilanz*.csv

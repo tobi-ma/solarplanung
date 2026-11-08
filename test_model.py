@@ -50,11 +50,23 @@ class UITests(unittest.TestCase):
         app = AppTest.from_file(str(Path(__file__).with_name("app.py"))).run(timeout=30)
         self.assertEqual(len(app.exception), 0)
         self.assertIn("18.090", app.metric[0].value)
+        self.assertIn("Heizung & Speicher", [tab.label for tab in app.tabs])
+        self.assertEqual(app.number_input(key="h_heat").value, 16000.)
         app.number_input(key="scaffold").set_value(0.).run()
         self.assertEqual(len(app.exception), 0)
         self.assertIn("16.090", app.metric[0].value)
         app.number_input(key="share_2").set_value(99.).run()
         self.assertGreater(len(app.error), 0)
+
+    def test_heating_controls(self):
+        from streamlit.testing.v1 import AppTest
+        app = AppTest.from_file(str(Path(__file__).with_name("app.py"))).run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        app.checkbox(key="h_battery").uncheck()
+        app.checkbox(key="h_central_cooling").check().run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        self.assertFalse(app.session_state["h_battery"])
+        self.assertEqual(len(app.warning), 0)
 
 
 if __name__ == "__main__":
